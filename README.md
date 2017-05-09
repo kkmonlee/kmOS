@@ -1,5 +1,5 @@
 <p align="center">
-    ![logo](media/kmos.png)
+    ![logo](https://raw.githubusercontent.com/kkmonlee/kmOS/master/media/kmos.png)
 </p>
 
 # kmOS
