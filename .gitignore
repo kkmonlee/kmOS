@@ -1,4 +1,5 @@
 # Prerequisites
+!helloworld.c
 *.d
 
 # Object files
