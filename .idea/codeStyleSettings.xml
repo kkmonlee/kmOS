@@ -24,7 +24,7 @@
             <option name="com.jetbrains.cidr.lang.util.OCDeclarationKind" value="DeallocMethod" />
           </class>
           <extensions>
-            <pair source="cpp" header="hpp" />
+            <pair source="cc" header="hh" />
             <pair source="c" header="h" />
           </extensions>
         </Objective-C-extensions>

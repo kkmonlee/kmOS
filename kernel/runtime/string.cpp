@@ -14,7 +14,7 @@ int strlen(char* s) {
     return i;
 }
 
-char *Strncpy(char* destString, const char* sourceString, int maxLength) {
+char *strncpy(char* destString, const char* sourceString, int maxLength) {
     unsigned count;
 
     if ((destString == (char*) NULL) || (sourceString == (char*) NULL)) {
