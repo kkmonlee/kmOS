@@ -3,5 +3,5 @@ project(kmOS)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
-set(SOURCE_FILES helloworld.c)
+set(SOURCE_FILES helloworld.c kernel/config.h)
 add_executable(kmOS ${SOURCE_FILES})
