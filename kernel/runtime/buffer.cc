@@ -2,8 +2,8 @@
 // Created by aa on 18/05/17.
 //
 
-#include <os.h>
-#include <runtime/buffer.h>
+#include <../core/os.h>
+#include <buffer.h>
 
 Buffer::Buffer(char* n, u32 siz) {
     map = (char*) kmalloc(siz);
