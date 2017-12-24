@@ -15,7 +15,7 @@ all:
 	make -C ./userland
 
 build:
-	zip -r devos-$(VERSION).zip ./
+	zip -r kmos-$(VERSION).zip ./
 
 run:
 	@echo "Running kmOS"
