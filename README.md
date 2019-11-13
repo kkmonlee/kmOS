@@ -31,6 +31,6 @@ kmOS is event-driven, preemptible, SMP-ready, and network ready.
   - EXT2 (read only)
   - Boch VBE
 - Userland
-  - POSIX
+  - POSIX / ANSI (hopefully)
   - LibC
   - Can run Shell and Lua
