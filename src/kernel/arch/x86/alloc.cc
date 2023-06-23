@@ -1,4 +1,5 @@
 #include <os.h>
+#include <io.h>
 
 extern "C" {
     // Change size of a memory segment

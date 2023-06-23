@@ -1,4 +1,6 @@
 #include <os.h>
+#include <io.h>
+#include <alloc.cc>
 
 extern "C" {
     int __cxa_atexit(void (*Destructor) (void *), void *Parameter, void *HomeDSO);
@@ -74,7 +76,7 @@ void operator delete[](void *ptr) {
     ::operator delete(ptr);
 }
 
-void* operaotr new[](size_t len) {
+void* operator new[](size_t len) {
     return ::operator new(len);
 }
 
