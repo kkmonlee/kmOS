@@ -1,4 +1,3 @@
-
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
 
@@ -12,24 +11,23 @@ public:
   ~Filesystem();
 
   void init();
-  void mknod(char *module, char *name, u32 flag);
+  void mknod(const char *module, const char *name, u32 flag);
 
-  File *path(char *p);
-  File *path_parent(char *p, char *fname);
+  File *path(const char *p);
+  File *path_parent(const char *p, char *fname);
 
-  u32 link(char *fname, char *newf);
-
-  u32 addFile(char *dir, File *fp);
+  u32 link(const char *fname, const char *newf);
+  u32 addFile(const char *dir, File *fp);
 
   File *pivot_root(File *targetdir);
-
   File *getRoot();
 
 private:
-  File *root;
-  File *dev;
-  File *var;
+  File *root; // root directory
+  File *dev;  // device directory
+  File *var;  // variable directory
 };
 
 extern Filesystem fsm;
-#endif
+
+#endif // FILESYSTEM_H
