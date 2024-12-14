@@ -3,62 +3,75 @@
 
 #include <runtime/types.h>
 
-#define IDTSIZE                 0xFF
-#define GDTSIZE                 0xFF
+/* descriptor table sizes */
+#define IDTSIZE 0xFF // maximum descriptors in IDT
+#define GDTSIZE 0xFF // maximum descriptors in GDT
 
-#define IDTBASE                 0x00000000
-#define GDTBASE                 0x00000000
+/* base addresses for descriptor tables */
+#define IDTBASE 0x00000000 // physical address for IDT
+#define GDTBASE 0x00000800 // physical address for GDT
 
-#define INTGATE                 0x8E00
-#define TRAPGATE                0xEF00
+/* gate types */
+#define INTGATE 0x8E00  // used for handling interrupts
+#define TRAPGATE 0xEF00 // used for system calls
 
-#define KERN_PDIR               0x00001000
-#define KERN_STACK              0x0009FFF0
-#define KERN_BASE               0x00100000
-#define KERN_PG_HEAP            0x00800000
-#define KERN_PG_HEAP_LIM        0x10000000
-#define KERN_HEAP               0x10000000
-#define KERN_HEAP_LIM           0x40000000
+/* memory layout definitions */
+#define KERN_PDIR 0x00001000
+#define KERN_STACK 0x0009FFF0
+#define KERN_BASE 0x00100000
+#define KERN_PG_HEAP 0x00800000
+#define KERN_PG_HEAP_LIM 0x10000000
+#define KERN_HEAP 0x10000000
+#define KERN_HEAP_LIM 0x40000000
 
-#define USER_OFFSET             0x40000000
-#define USER_STACK              0xE0000000
+#define USER_OFFSET 0x40000000
+#define USER_STACK 0xE0000000
 
-#define KERN_PG_1               0x400000
-#define KERN_PG_1_LIM           0x800000
+#define KERN_PG_1 0x400000
+#define KERN_PG_1_LIM 0x800000
 
-#define VADDR_PD_OFFSET(addr)   ((addr) & 0xFFC00000) >> 22
-#define VADDR_PT_OFFSET(addr)   ((addr) & 0x003FF000) >> 12
-#define VADDR_PG_OFFSET(addr)   (addr) & 0x00000FFF
-#define PAGE(addr)              (addr) >> 12
+/* page address calculations */
+#define VADDR_PD_OFFSET(addr) (((addr) & 0xFFC00000) >> 22)
+#define VADDR_PT_OFFSET(addr) (((addr) & 0x003FF000) >> 12)
+#define VADDR_PG_OFFSET(addr) ((addr) & 0x00000FFF)
+#define PAGE(addr) ((addr) >> 12)
 
-#define PAGING_FLAG             0x80000000
-#define PSE_FLAG                0x00000010
+/* control register flags */
+#define PAGING_FLAG 0x80000000 // CR0 - bit 31
+#define PSE_FLAG 0x00000010    // CR4 - bit 4
 
-#define PG_PRESENT              0x00000001
-#define PG_WRITE                0x00000002
-#define PG_USER				    0x00000004
-#define PG_4MB				    0x00000080
+/* page table and directory flags */
+#define PG_PRESENT 0x00000001
+#define PG_WRITE 0x00000002
+#define PG_USER 0x00000004
+#define PG_4MB 0x00000080
 
-#define	PAGESIZE 			    4096
-#define	RAM_MAXSIZE			    0x100000000
-#define	RAM_MAXPAGE			    0x100000
+#define PAGESIZE 4096
+#define RAM_MAXSIZE 0x100000000
+#define RAM_MAXPAGE 0x100000
 
-struct gdtdesc {
+/* gdt segment descriptor */
+struct gdtdesc
+{
     u16 lim0_15;
     u16 base0_15;
     u8 base16_23;
     u8 acces;
-    u8 lim16_19:4;
-    u8 other:4;
+    u8 lim16_19 : 4;
+    u8 other : 4;
     u8 base24_31;
-} __attribute__ ((packed));
+} __attribute__((packed));
 
-struct gdtr {
-    u16 limit;
+/* gdtr register */
+struct gdtr
+{
+    u16 limite;
     u32 base;
-} __attribute__ ((packed));
+} __attribute__((packed));
 
-struct tss {
+/* task state segment */
+struct tss
+{
     u16 previous_task, __previous_task_unused;
     u32 esp0;
     u16 ss0, __ss0_unused;
@@ -76,5 +89,48 @@ struct tss {
     u16 gs, __gs_unused;
     u16 ldt_selector, __ldt_sel_unused;
     u16 debug_flag, io_map;
-} __attribute__ ((packed));
+} __attribute__((packed));
 
+/* idt segment descriptor */
+struct idtdesc
+{
+    u16 offset0_15;
+    u16 select;
+    u16 type;
+    u16 offset16_31;
+} __attribute__((packed));
+
+/* idtr register */
+struct idtr
+{
+    u16 limite;
+    u32 base;
+} __attribute__((packed));
+
+/* cpu registers during interrupt */
+typedef struct
+{
+    u32 edi, esi, ebp, esp, ebx, edx, ecx, eax;
+    u32 ds, es, fs, gs;
+    u32 which_int, err_code;
+    u32 eip, cs, eflags, user_esp, user_ss;
+} __attribute__((packed)) regs_t;
+
+typedef void (*int_desc)(void);
+
+extern "C"
+{
+    void init_gdt_desc(u32, u32, u8, u8, struct gdtdesc *);
+    void init_gdt(void);
+    void init_idt_desc(u16, u32, u16, struct idtdesc *);
+    void init_idt(void);
+    void init_pic(void);
+    int install_irq(unsigned int num, unsigned int irq);
+    void switch_to_task(process_st *current, int mode);
+    extern tss default_tss;
+    u32 cpu_vendor_name(char *name);
+    int dequeue_signal(int);
+    int handle_signal(int);
+}
+
+#endif // __X86__
