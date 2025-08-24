@@ -1,6 +1,5 @@
 #include <os.h>
 #include <io.h>
-#include <alloc.cc>
 
 extern "C" {
     int __cxa_atexit(void (*Destructor) (void *), void *Parameter, void *HomeDSO);
@@ -67,8 +66,16 @@ void operator delete(void *ptr) {
     kfree(ptr);
 }
 
+void operator delete(void *ptr, unsigned long) {
+    kfree(ptr);
+}
+
+void operator delete[](void *ptr, unsigned long) {
+    ::operator delete(ptr);
+}
+
 #ifndef __arm__
-void* operator new(size_t len) {
+void* operator new(unsigned long len) {
     return (void *)kmalloc(len);
 }
 

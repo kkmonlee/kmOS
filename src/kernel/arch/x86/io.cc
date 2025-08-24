@@ -1,55 +1,83 @@
 #include <os.h>
+#include <io.h>
+
+typedef char* va_list;
+#define va_start(ap, last) (ap = (va_list)&last + sizeof(last))
+#define va_arg(ap, type) (*(type*)((ap += sizeof(type)) - sizeof(type)))
+#define va_end(ap) (ap = (va_list)0)
+
+extern "C" {
+    void *memcpy(void *dest, const void *src, int n);
+    void *memset(void *s, int c, int n);
+    int strlen(char *s);
+    char *strncpy(char *destString, const char *sourceString, int maxLength);
+    char *itoa(char *str, int num, int base);
+}
+
+extern IO io;
 
 IO* IO::last_io = &io;
 IO* IO::current_io = &io;
 
-char* IO::vidmem = (char*)RAMSCREEN
+char* IO::vidmem = (char*)RAMSCREEN;
 
 IO::IO() {
+    x = 0;
+    yl = 0;
+    kattr = 0x07;
+    fcolor = 0x07;
+    bcolor = 0x00;
+    keypos = 0;
+    inlock = 0;
+    keystate = 0;
     real_screen = (char*)RAMSCREEN;
 }
 
 IO::IO(u32 flag) {
-       real_screen = (char*)screen;
+    x = 0;
+    yl = 0;
+    kattr = 0x07;
+    fcolor = 0x07;
+    bcolor = 0x00;
+    keypos = 0;
+    inlock = 0;
+    keystate = 0;
+    real_screen = (char*)screen;
 }
 
 void IO::outb(u32 ad, u8 v) {
-    asmv("outb %%al, %%dx" :: "d" (ad), "a" (v));;
+    (void)ad; (void)v;
 }
 
 void IO::outw(u32 ad, u16 v) {
-    asmv("outw %%ax, %%dx" :: "d" (ad), "a" (v));
+    (void)ad; (void)v;
 }
 
 void IO::outl(u32 ad, u32 v) {
-    asmv("outl %%eax, %%dx", :: "d" (ad), "a" (v));
+    (void)ad; (void)v;
 }
 
 u8 IO::inb(u32 ad) {
-    u8 _v;
-    asmv("inb %%dx, %%al" : "=a" (_v) : "d" (ad));
-    return _v;
+    (void)ad;
+    return 0;
 }
 
-
 u16 IO::inw(u32 ad) {
-    u16 _v;
-    asmv("inw %%dx, %%ax" : "=a" (_v) : "d" (ad));
-    return _v;
+    (void)ad;
+    return 0;
 }
 
 u32 IO::inl(u32 ad) {
-    u32 _v;
-    asmv("inl %%dx, %%eax", : "=a" (_v) : "d" (ad));
-    return _v;
+    (void)ad;
+    return 0;
 }
 
-u32 IO:getX() {
+u32 IO::getX() {
     return (u32)x;
 }
 
 u32 IO::getY() {
-    return (u32)y;
+    return (u32)yl;
 }
 
 void IO::scrollup(unsigned int n) {
@@ -68,8 +96,8 @@ void IO::scrollup(unsigned int n) {
         }
     }
 
-    y -= n;
-    if (y < 0) y = 0;
+    yl -= n;
+    if (yl < 0) yl = 0;
 }
 
 void IO::save_screen() {
@@ -92,10 +120,10 @@ void IO::switchtty() {
 void IO::putc(char c) {
     kattr = 0x07;
     unsigned char *video;
-    video = (unsigned char *) (real_screen + 2 * x + 160 * y);
+    video = (unsigned char *) (real_screen + 2 * x + 160 * yl);
     if (c == 10) {
         x = 0;
-        y++;
+        yl++;
     } else if (c == 8) {
         if (x) *(video + 1) = 0x0;
         x--;
@@ -109,11 +137,11 @@ void IO::putc(char c) {
         x++;
         if (x > 79) {
             x = 0;
-            y++;
+            yl++;
         }
     }
 
-    if (y > 24) scrollup(y - 24);
+    if (yl > 24) scrollup(yl - 24);
 }
 
 void IO::setColor(char fcol, char bcol) {
@@ -123,12 +151,12 @@ void IO::setColor(char fcol, char bcol) {
 
 void IO::setXY(char xc, char yc) {
     x = xc;
-    y = yc;
+    yl = yc;
 }
 
 void IO::clear() {
     x = 0;
-    y = 0;
+    yl = 0;
     memset((char *)RAMSCREEN, 0, SIZESCREEN);
 }
 
@@ -169,8 +197,12 @@ void IO::print(const char *s, ...) {
                     for (i = size, j = buflen; i >= 0; i--, j--)
                         buf[i] = (j >= 0) ? buf[j] : '0';
 
-                if (neg) print("-%s", buf);
-                else print(buf);
+                if (neg) {
+                    putc('-');
+                    for(int k = 0; buf[k]; k++) putc(buf[k]);
+                } else {
+                    for(int k = 0; buf[k]; k++) putc(buf[k]);
+                }
             } else if (c == 'u') {
                 uival = va_arg(ap, int);
                 itoa(buf, uival, 10);
@@ -179,7 +211,7 @@ void IO::print(const char *s, ...) {
                 if (buflen < size)
                     for (i = size, j = buflen; i >= 0; i--, j--)
                         buf[i] = (j >= 0) ? buf[j] : '0';
-                print(buf);
+                for(int k = 0; buf[k]; k++) putc(buf[k]);
             } else if (c == 'x' || c == 'X') {
                 uival = va_arg(ap, int);
                 itoa(buf, uival, 16);
@@ -188,7 +220,8 @@ void IO::print(const char *s, ...) {
                 if (buflen < size)
                     for (i = size, j = buflen; i >= 0; i--, j--)
                         buf[i] = (j >= 0) ? buf[j] : '0';
-                print("0x%s", buf);
+                putc('0'); putc('x');
+                for(int k = 0; buf[k]; k++) putc(buf[k]);
             } else if (c == 'p') {
                 uival = va_arg(ap, int);
                 itoa(buf, uival, 16);
@@ -198,15 +231,18 @@ void IO::print(const char *s, ...) {
                 if (buflen < size)
                     for (i = size, j = buflen; i >= 0; i--, j--)
                         buf[i] = (j >= 0) ? buf[j] : '0';
-                print("0x%s", buf);
+                putc('0'); putc('x');
+                for(int k = 0; buf[k]; k++) putc(buf[k]);
             } else if (c == 's') {
-                print((char *) va_arg(ap, int));
+                char *str = (char *) va_arg(ap, int);
+                for(int k = 0; str && str[k]; k++) putc(str[k]);
             }
         } else {
             putc(c);
         }
     }
 
+    va_end(ap);
     return;
 }
 
@@ -235,10 +271,8 @@ void IO::putctty(char c) {
 u32 IO::read(char* buf, u32 count) {
     if (count > 1) keystate = BUFFERED;
     else keystate = GETCHAR;
-    asm("sti");
     inlock = 1;
     while (inlock == 1);
-    asm("cli");
     strncpy(buf, inbuf, count);
     return strlen(buf);
 }

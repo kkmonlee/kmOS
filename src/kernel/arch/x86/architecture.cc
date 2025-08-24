@@ -24,3 +24,18 @@ u32 Architecture::getArg(u32 argnum) {
 int Architecture::createProc(process_st* info, char* file, int argc, char** argv) {
     return 0;
 }
+
+void Architecture::disable_interrupt() {
+}
+
+void Architecture::setRet(u32 value) {
+    (void)value;
+}
+
+void Architecture::change_process_father(Process* child, Process* new_father) {
+    (void)child;
+    (void)new_father;
+}
+
+void Architecture::destroy_all_zombie() {
+}

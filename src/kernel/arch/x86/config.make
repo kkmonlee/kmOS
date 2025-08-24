@@ -1,13 +1,13 @@
-CC=/usr/bin/gcc
-SC=/usr/bin/g++
+CC=i686-elf-gcc
+SC=i686-elf-g++
 ASM=nasm
-LD=ld
+LD=i686-elf-ld
 NM=nm
 OBJDUMP=objdump
 
 ASMFLAG=-f elf32
-LDFLAG=-T arch/x86/linker.ld -melf_i386
-FLAG=-m32 -Wall -Wextra -O2 -fno-builtin -nostdinc -fno-stack-protector -nostdlib -fno-exceptions -fno-rtti -mno-red-zone $(INCDIR)
+LDFLAG=-m elf_i386 -T arch/x86/linker.ld
+FLAG=-m32 -Wall -Wextra -O2 -fno-builtin -nostdinc -fno-stack-protector -nostdlib -fno-exceptions -fno-rtti $(INCDIR)
 
 CFLAGS=$(FLAG)
 CXXFLAGS=$(FLAG)

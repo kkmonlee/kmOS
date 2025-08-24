@@ -3,6 +3,10 @@
 #include <runtime/alloc.h>
 #include <arch/x86/architecture.h>
 
+extern "C" {
+    void pd_add_page(char *v_addr, char *p_addr, u32 flags, struct page_directory *pd);
+}
+
 struct page {
     char *p_addr;
     char *v_addr;
@@ -186,6 +190,9 @@ stat_fs File::stat()
 {
   stat_fs st;
   return st;
+}
+
+void File::scan() {
 }
 
 /**

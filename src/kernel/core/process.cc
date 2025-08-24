@@ -223,6 +223,14 @@ void Process::deleteFile(u32 fd)
   openfp[fd].ptr = 0;
 }
 
+void Process::setFile(u32 fd, File* file, u32 mode, u32 ptr) {
+  if (fd < CONFIG_MAX_FILE) {
+    openfp[fd].fp = file;
+    openfp[fd].mode = mode;
+    openfp[fd].ptr = ptr;
+  }
+}
+
 /* State management */
 void Process::setState(u8 st)
 {
@@ -257,6 +265,9 @@ void Process::reset_pinfo()
   ppinfo.state = state;
   ppinfo.vmem = 10 * 1024 * 1024; // Example values
   ppinfo.pmem = 10 * 1024 * 1024;
+}
+
+void Process::scan() {
 }
 
 /* Directory management */

@@ -4,7 +4,7 @@
 #include <api/dev/tty.h>
 
 char kbdmap_default[] = {
-    KEY_ESCAPE, KEY_ESCAPE, KEY_ESCAPE, KEY_ESCAPE, // esc
+    (char)KEY_ESCAPE, (char)KEY_ESCAPE, (char)KEY_ESCAPE, (char)KEY_ESCAPE, // esc
     '1', '!', '1', '1',
     '2', '@', '2', '2',
     '3', '#', '3', '3',
@@ -30,9 +30,9 @@ char kbdmap_default[] = {
     'o', 'O', 'o', 'o',
     'p', 'P', 'p', 'p',
     '^', '"', '^', '^',
-    '$', '£', ' ', '$',
+    '$', '#', ' ', '$',
     0x0A, 0x0A, 0x0A, 0x0A, // enter
-    0xFF, 0xFF, 0xFF, 0xFF, // ctrl
+    (char)0xFF, (char)0xFF, (char)0xFF, (char)0xFF, // ctrl
     'q', 'Q', 'q', 'q',
     's', 'S', 's', 's',
     'd', 'D', 'd', 'd',
@@ -45,7 +45,7 @@ char kbdmap_default[] = {
     'm', 'M', 'm', 'm',
     0x27, 0x22, 0x27, 0x27, // '"
     '*', '~', '`', '`',     // `~
-    0xFF, 0xFF, 0xFF, 0xFF, // Lshift
+    (char)0xFF, (char)0xFF, (char)0xFF, (char)0xFF, // Lshift
     '<', '>', '\\', '\\',
     'w', 'W', 'w', 'w',
     'x', 'X', 'x', 'x',
@@ -57,15 +57,15 @@ char kbdmap_default[] = {
     0x2C, 0x3C, 0x2C, 0x2C, // ,<
     0x2E, 0x3E, 0x2E, 0x2E, // .>
     0x2F, 0x3F, 0x2F, 0x2F, // /?
-    0xFF, 0xFF, 0xFF, 0xFF, // Rshift
-    0xFF, 0xFF, 0xFF, 0xFF, // reserved
-    0xFF, 0xFF, 0xFF, 0xFF,
+    (char)0xFF, (char)0xFF, (char)0xFF, (char)0xFF, // Rshift
+    (char)0xFF, (char)0xFF, (char)0xFF, (char)0xFF, // reserved
+    (char)0xFF, (char)0xFF, (char)0xFF, (char)0xFF,
     ' ', ' ', ' ', ' ', // space
-    KEY_F1, 0xFF, 0xFF, 0xFF,
-    KEY_F2, 0xFF, 0xFF, 0xFF,
-    KEY_F3, 0xFF, 0xFF, 0xFF,
+    (char)KEY_F1, (char)0xFF, (char)0xFF, (char)0xFF,
+    (char)KEY_F2, (char)0xFF, (char)0xFF, (char)0xFF,
+    (char)KEY_F3, (char)0xFF, (char)0xFF, (char)0xFF,
     // remaining keys as placeholders
-    0xFF, 0xFF, 0xFF, 0xFF};
+    (char)0xFF, (char)0xFF, (char)0xFF, (char)0xFF};
 
 char *kbdmap = kbdmap_default;
 
