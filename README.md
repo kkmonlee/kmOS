@@ -95,4 +95,4 @@ kmOS is event-driven, preemptible, SMP-ready, and network ready.
     - Kernel tracing (like `strace`, `ltrace`)
 
 ## Screenshots
-<img src="https://raw.githubusercontent.com/kkmonlee/kmOS/master/media/v0.1-screengrab.png">
+<img src="https://raw.githubusercontent.com/kkmonlee/kmOS/refs/heads/master/media/v0.1-screengrab.png">
