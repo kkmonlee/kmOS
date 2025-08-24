@@ -1,9 +1,4 @@
 <p align="center">
-  <!--<b>Some Links:</b><br>
-  <a href="#">Link 1</a> |
-  <a href="#">Link 2</a> |
-  <a href="#">Link 3</a>
-  <br><br>-->
   <img src="https://raw.githubusercontent.com/kkmonlee/kmOS/master/media/kmos.png">
 </p>
 
@@ -98,3 +93,6 @@ kmOS is event-driven, preemptible, SMP-ready, and network ready.
     - Kernel log viewer (like `dmesg`)
     - Maybe system monitoring (like `top`, `iotop`, `htop`)
     - Kernel tracing (like `strace`, `ltrace`)
+
+## Screenshots
+<img src="https://raw.githubusercontent.com/kkmonlee/kmOS/master/media/v0.1-screengrab.png">
