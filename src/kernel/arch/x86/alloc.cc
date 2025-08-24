@@ -9,13 +9,40 @@ struct kmalloc_header {
 
 #define KMALLOC_MINSIZE 16
 
-char *kern_heap = (char*)KERN_HEAP;
+char *kern_heap = 0;
+char *heap_start = 0;
 unsigned long kmalloc_used = 0;
+static int heap_initialized = 0;
 
 extern "C" {
     char *get_page_frame();
     void pd0_add_page(char *v_addr, char *p_addr, unsigned int flags);
 }
+
+    // Initialize the heap with a simple static buffer
+    void init_heap() {
+        struct kmalloc_header *initial_chunk;
+        
+        if (heap_initialized) return;
+        
+        // For simplicity, use a static buffer for the heap
+        // In a real kernel, this would be proper virtual memory
+        static char heap_buffer[0x100000]; // 1MB heap buffer
+        
+        // Set up heap pointers
+        heap_start = heap_buffer;
+        kern_heap = heap_buffer + sizeof(heap_buffer);
+        
+        // Initialize the first chunk at the beginning of our static heap
+        initial_chunk = (struct kmalloc_header *)heap_start;
+        initial_chunk->size = sizeof(heap_buffer);
+        initial_chunk->used = 0;
+        
+        heap_initialized = 1;
+        
+        io.print("[HEAP] Heap initialized at %x with %d bytes\n", 
+                 (unsigned int)heap_buffer, (int)sizeof(heap_buffer));
+    }
 
 extern "C" {
     // Change size of a memory segment
@@ -52,6 +79,11 @@ extern "C" {
     // Allocate memory block
     void *kmalloc(unsigned long size) {
         if (size == 0) return 0;
+        
+        // Initialize heap if not done yet
+        if (!heap_initialized) {
+            init_heap();
+        }
 
         unsigned long realsize;
         struct kmalloc_header *chunk, *other;
@@ -59,7 +91,7 @@ extern "C" {
         if ((realsize = sizeof(struct kmalloc_header) + size) < KMALLOC_MINSIZE)
             realsize = KMALLOC_MINSIZE;
 
-        chunk = (struct kmalloc_header *) KERN_HEAP;
+        chunk = (struct kmalloc_header *) heap_start;
         while (chunk->used || chunk->size < realsize) {
             if (chunk->size == 0) {
                 io.print("\nPRINT: kmalloc(): corrupted chunk on %x with null size (heap %x)!\nSystem halted\n",
@@ -70,15 +102,8 @@ extern "C" {
 
             chunk = (struct kmalloc_header *) ((char *) chunk + chunk->size);
 
-            if (chunk == (struct kmalloc_header *) kern_heap) {
-                if ((int) (ksbrk((realsize / PAGESIZE) + 1)) < 0) {
-                    io.print("\nPANIC: kmalloc(): no memory left kernel!\nSystem halted\n");
-                    while(1);
-                    return 0;
-                }
-            } else if (chunk > (struct kmalloc_header *) kern_heap) {
-                io.print("\nPANIC: kmalloc(): chunk on %x while heap limit is on %x!\nSystem halted\n",
-                        chunk, kern_heap);
+            if (chunk >= (struct kmalloc_header *) kern_heap) {
+                io.print("\nPANIC: kmalloc(): out of heap memory (requested %lu bytes)!\nSystem halted\n", size);
                 while(1);
                 return 0;
             }
