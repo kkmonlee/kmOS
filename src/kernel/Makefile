@@ -61,7 +61,7 @@ geniso:
 	$(SC) $(FLAG) -c $< -o  $@
 	
 %.o: %.asm
-	$(ASM) $(ASMFLAG)  -c $< -o  $@
+	$(ASM) $(ASMFLAG) $< -o $@
 
 
 clean:

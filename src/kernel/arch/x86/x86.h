@@ -126,7 +126,7 @@ extern "C"
     void init_idt(void);
     void init_pic(void);
     int install_irq(unsigned int num, unsigned int irq);
-    void switch_to_task(process_st *current, int mode);
+    void switch_to_task(struct process_st *current, int mode);
     extern tss default_tss;
     u32 cpu_vendor_name(char *name);
     int dequeue_signal(int);

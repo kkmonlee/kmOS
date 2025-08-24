@@ -1,8 +1,12 @@
 #include <os.h>
+#include <socket.h>
+#include <filesystem.h>
+
+extern Filesystem fsm;
 
 Socket::~Socket() {}
 
-Socket::Socket(char *n) : File(n, TYPE_FILE)
+Socket::Socket(const char *n) : File((char*)n, TYPE_FILE)
 {
   fsm.addFile("/sys/sockets/", this);
 }
@@ -17,12 +21,12 @@ u32 Socket::close()
   return RETURN_OK;
 }
 
-u32 Socket::read(u8 *buffer, u32 size)
+u32 Socket::read(u32 pos, u8 *buffer, u32 size)
 {
   return NOT_DEFINED;
 }
 
-u32 Socket::write(u8 *buffer, u32 size)
+u32 Socket::write(u32 pos, u8 *buffer, u32 size)
 {
   return NOT_DEFINED;
 }

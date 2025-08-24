@@ -1,4 +1,15 @@
 #include <os.h>
+#include <user.h>
+#include <filesystem.h>
+#include <system.h>
+
+extern "C" {
+    void *memset(void *s, int c, int n);
+    char *strncpy(char *destString, const char *sourceString, int maxLength);
+}
+
+extern Filesystem fsm;
+extern System sys;
 
 User::~User() {}
 

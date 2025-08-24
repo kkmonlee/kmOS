@@ -30,7 +30,7 @@ extern "C" {
         return (destString);
     }
 
-    int strcmp(const char *dst, char *src) {
+    int strcmp(const char *dst, const char *src) {
         int i = 0;
 
         while ((dst[i] == src[i])) {
@@ -43,10 +43,28 @@ extern "C" {
 
     int strcpy(char *dst, const char *src) {
         int i = 0;
-        while ((dst[i] = src[i++]));
+        while ((dst[i] = src[i]) != 0) { i++; }
 
         return i;
     }
+
+    void *memcpy(void *dest, const void *src, int n) {
+        char *d = (char*)dest;
+        const char *s = (const char*)src;
+        for (int i = 0; i < n; i++) {
+            d[i] = s[i];
+        }
+        return dest;
+    }
+
+    void *memset(void *s, int c, int n) {
+        char *ptr = (char*)s;
+        for (int i = 0; i < n; i++) {
+            ptr[i] = c;
+        }
+        return s;
+    }
+
 
     void strcat(void *dest, const void *src) {
         memcpy((char*) ((int)dest + (int)strlen((char*)dest)), (char*)src, strlen((char*)src));

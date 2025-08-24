@@ -76,13 +76,13 @@ void operator delete[](void *ptr) {
     ::operator delete(ptr);
 }
 
-void* operator new[](size_t len) {
+void* operator new[](unsigned long len) {
     return ::operator new(len);
 }
 
 #else
 
-void* operator new(size_t len) {
+void* operator new(unsigned long len) {
     return (void*)kmalloc(len);
 }
 
@@ -90,7 +90,7 @@ void operator delete[](void *ptr) {
     ::operator delete(ptr);
 }
 
-void* operator new[](size_t len) {
+void* operator new[](unsigned long len) {
     return ::operator new(len);
 }
 #endif

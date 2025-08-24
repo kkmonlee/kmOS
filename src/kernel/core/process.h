@@ -78,6 +78,7 @@ protected:
   Process *pnext;                   // Next process in the schedule
   openfile openfp[CONFIG_MAX_FILE]; // Array of open files
   proc_info ppinfo;                 // Process information
+  process_st info;                  // Architecture-specific process info
   File *cdir;                       // Current directory
   Buffer *ipc;                      // Inter-process communication buffer
 

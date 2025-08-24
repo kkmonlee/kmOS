@@ -58,7 +58,7 @@ public:
     void save_screen();
     void load_screen();
 
-    enum ConsoleType() {
+    enum ConsoleType {
         BUFFERED,
         GETCHAR
     };

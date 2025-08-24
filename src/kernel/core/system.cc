@@ -1,4 +1,17 @@
 #include <os.h>
+#include <system.h>
+#include <user.h>
+#include <filesystem.h>
+#include <arch/x86/architecture.h>
+
+extern "C" {
+    int strlen(char *s);
+    void *memset(void *s, int c, int n);
+    int strncmp(const char* s1, const char* s2, int c);
+}
+
+extern Filesystem fsm;
+extern Architecture arch;
 
 /*
  * System class manages users, environment variables, and system organization.

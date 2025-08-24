@@ -1,6 +1,15 @@
 #include <os.h>
 #include <process.h>
-#include <kernel/arch/x86/architecture.h>
+#include <arch/x86/architecture.h>
+#include <filesystem.h>
+#include <elf_loader.h>
+
+extern "C" {
+    char *strncpy(char *destString, const char *sourceString, int maxLength);
+    void *memcpy(void *dest, const void *src, int n);
+}
+
+extern Filesystem fsm;
 
 /*
  *	u32 open(char* name,u32 flag);

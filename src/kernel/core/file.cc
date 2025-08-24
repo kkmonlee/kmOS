@@ -1,8 +1,23 @@
 #include <os.h>
 #include <file.h>
-#include <cstring>
-#include <alloc.h>
+#include <runtime/alloc.h>
 #include <arch/x86/architecture.h>
+
+struct page {
+    char *p_addr;
+    char *v_addr;
+    list_head list;
+};
+
+struct page_directory;
+
+extern "C" {
+    int strlen(char *s);
+    void *memcpy(void *dest, const void *src, int n);
+    void *memset(void *s, int c, int n);
+    int strcmp(const char *s1, const char *s2);
+    void pd_add_page(char *v_addr, char *p_addr, u32 flags, struct page_directory *pd);
+}
 
 static void strreplace(char *s, char a, char to)
 {

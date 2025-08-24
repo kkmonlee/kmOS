@@ -35,7 +35,7 @@ static_ctors_loop:
 
 static_dtors_loop:
 	mov ebx, start_dtors
-	jmp .text
+	jmp .test
 .body:
 	call [ebx]
 	add ebx,4

@@ -1,0 +1,3 @@
+MODULE_OBJS := 
+
+OBJS := $(OBJS) $(MODULE_OBJS)

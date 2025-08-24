@@ -1,4 +1,13 @@
 #include <os.h>
+#include <filesystem.h>
+
+extern "C" {
+    void *memcpy(void *dest, const void *src, int n);
+    int strcmp(const char *s1, const char *s2);
+    int strcpy(char *dst, const char *src);
+}
+
+#include <arch/x86/architecture.h>
 
 // class to manage file hierarchy
 
@@ -23,9 +32,8 @@ Filesystem::~Filesystem()
   delete root;
 }
 
-void Filesystem::mknod(char *module, char *name, u32 flag)
+void Filesystem::mknod(const char *module, const char *name, u32 flag)
 {
-  modm.createDevice(name, module, flag);
 }
 
 File *Filesystem::getRoot()
@@ -33,15 +41,15 @@ File *Filesystem::getRoot()
   return root;
 }
 
-File *Filesystem::path(char *p)
+File *Filesystem::path(const char *p)
 {
   if (!p)
     return NULL;
 
   File *fp = root;
   char *name = NULL;
-  char *beg_p = p;
-  char *end_p = beg_p;
+  const char *beg_p = p;
+  const char *end_p = beg_p;
 
   if (p[0] != '/' && arch.pcurrent != NULL)
   {
@@ -50,7 +58,7 @@ File *Filesystem::path(char *p)
 
   while (*beg_p == '/')
     beg_p++;
-  end_p = beg_p + 1;
+  end_p++;
 
   while (*beg_p != '\0')
   {
@@ -90,7 +98,7 @@ File *Filesystem::path(char *p)
     beg_p = end_p;
     while (*beg_p == '/')
       beg_p++;
-    end_p = beg_p + 1;
+    end_p++;
   }
 
   return fp;
@@ -113,19 +121,19 @@ File *Filesystem::pivot_root(File *targetdir)
   return newRoot;
 }
 
-File *Filesystem::path_parent(char *p, char *fname)
+File *Filesystem::path_parent(const char *p, char *fname)
 {
   if (!p)
     return NULL;
 
   File *fp = root;
   char *name = NULL;
-  char *beg_p = p;
-  char *end_p = beg_p;
+  const char *beg_p = p;
+  const char *end_p = beg_p;
 
   while (*beg_p == '/')
     beg_p++;
-  end_p = beg_p + 1;
+  end_p++;
 
   while (*beg_p != '\0')
   {
@@ -160,13 +168,13 @@ File *Filesystem::path_parent(char *p, char *fname)
     beg_p = end_p;
     while (*beg_p == '/')
       beg_p++;
-    end_p = beg_p + 1;
+    end_p++;
   }
 
   return fp;
 }
 
-u32 Filesystem::link(char *fname, char *newf)
+u32 Filesystem::link(const char *fname, const char *newf)
 {
   File *tolink = path(fname);
   if (!tolink)
@@ -181,7 +189,7 @@ u32 Filesystem::link(char *fname, char *newf)
   return RETURN_OK;
 }
 
-u32 Filesystem::addFile(char *dir, File *fp)
+u32 Filesystem::addFile(const char *dir, File *fp)
 {
   File *parent = path(dir);
   if (!parent)

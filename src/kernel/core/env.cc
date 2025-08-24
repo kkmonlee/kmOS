@@ -1,4 +1,22 @@
 #include <os.h>
+#include <env.h>
+#include <filesystem.h>
+
+extern "C" {
+    int strlen(char *s);
+    void *memcpy(void *dest, const void *src, int n);
+    char *strncpy(char *destString, const char *sourceString, int maxLength);
+}
+
+int strnlen(const char *s, int maxlen) {
+    int len = 0;
+    while (len < maxlen && s[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
+extern Filesystem fsm;
 
 /*
  * defines the structure of an environment variable
@@ -13,14 +31,14 @@ Variable::~Variable()
   }
 }
 
-Variable::Variable(char *n, char *v) : File(n, TYPE_FILE)
+Variable::Variable(const char *n, const char *v) : File((char*)n, TYPE_FILE)
 {
   fsm.addFile("/sys/env/", this);
 
   if (v != nullptr)
   {
     io.print("env: create %s (%s) \n", n, v);
-    size_t value_len = strlen(v);
+    size_t value_len = strlen((char*)v);
     value_ = (char *)kmalloc(value_len + 1);
     memcpy(value_, v, value_len);
     value_[value_len] = '\0';

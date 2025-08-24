@@ -1,7 +1,20 @@
 #include <os.h>
+#include <elf_loader.h>
+#include <filesystem.h>
+
+#define PT_LOAD 1
+#define PF_X 1
+#define PF_W 2
+#define PF_R 4
+#define NO_FLAG 0
+
+extern "C" {
+    void *memcpy(void *dest, const void *src, int n);
+    void *memset(void *s, int c, int n);
+}
 
 // default process name and counter
-char *__default_proc_name = "_proc_";
+const char *__default_proc_name = "_proc_";
 char nb_default = '0';
 
 // checks if the file is in elf format
@@ -67,6 +80,7 @@ u32 load_elf(char *file, process_st *proc)
 // creates and executes a new process from an elf file
 int execv(char *file, int argc, char **argv)
 {
+  extern Filesystem fsm;
   File *fp = fsm.path(file);
   if (!fp)
     return ERROR_PARAM;
@@ -76,7 +90,7 @@ int execv(char *file, int argc, char **argv)
   fp->read(0, (u8 *)map_elf, fp->getSize());
   fp->close();
 
-  char *name = (argc <= 0) ? __default_proc_name : argv[0];
+  char *name = (char*)((argc <= 0) ? __default_proc_name : argv[0]);
   Process *proc = new Process(name);
   proc->create(map_elf, argc, argv);
 
@@ -87,7 +101,7 @@ int execv(char *file, int argc, char **argv)
 // executes a module at the given entry point
 void execv_module(u32 entry, int argc, char **argv)
 {
-  char *name = (argc <= 0) ? __default_proc_name : argv[0];
+  char *name = (char*)((argc <= 0) ? __default_proc_name : argv[0]);
   Process *proc = new Process(name);
   proc->create((char *)entry, argc, argv);
 }

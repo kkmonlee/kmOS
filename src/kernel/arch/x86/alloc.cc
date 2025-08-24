@@ -1,5 +1,21 @@
 #include <os.h>
 #include <io.h>
+#include <x86.h>
+
+struct kmalloc_header {
+    unsigned long size;
+    int used;
+};
+
+#define KMALLOC_MINSIZE 16
+
+char *kern_heap = (char*)KERN_HEAP;
+unsigned long kmalloc_used = 0;
+
+extern "C" {
+    char *get_page_frame();
+    void pd0_add_page(char *v_addr, char *p_addr, unsigned int flags);
+}
 
 extern "C" {
     // Change size of a memory segment
@@ -48,7 +64,7 @@ extern "C" {
             if (chunk->size == 0) {
                 io.print("\nPRINT: kmalloc(): corrupted chunk on %x with null size (heap %x)!\nSystem halted\n",
                         chunk, kern_heap);
-                asm("hlt");
+                while(1);
                 return 0;
             }
 
@@ -57,13 +73,13 @@ extern "C" {
             if (chunk == (struct kmalloc_header *) kern_heap) {
                 if ((int) (ksbrk((realsize / PAGESIZE) + 1)) < 0) {
                     io.print("\nPANIC: kmalloc(): no memory left kernel!\nSystem halted\n");
-                    asm("hlt");
+                    while(1);
                     return 0;
                 }
             } else if (chunk > (struct kmalloc_header *) kern_heap) {
                 io.print("\nPANIC: kmalloc(): chunk on %x while heap limit is on %x!\nSystem halted\n",
                         chunk, kern_heap);
-                asm("hlt");
+                while(1);
                 return 0;
             }
         }

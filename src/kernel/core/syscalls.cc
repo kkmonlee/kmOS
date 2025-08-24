@@ -1,6 +1,7 @@
 #include <os.h>
 #include <api.h>
 #include <api/kernel/syscall_table.h>
+#include <syscalls.h>
 
 #define sysc(a, h) add(a, (syscall_handler)h)
 

@@ -2,11 +2,18 @@
 #include <process.h>
 #include <architecture.h>
 #include <filesystem.h>
-#include <kernel/arch/x86/archprocess.h>
-#include <api/dev/proc.h>
-#include <string.h>
-#include <signal.h>
 #include <archprocess.h>
+#include <api/dev/proc.h>
+#include <signal.h>
+#include <config.h>
+
+extern "C" {
+    void *memcpy(void *dest, const void *src, int n);
+    char *strncpy(char *destString, const char *sourceString, int maxLength);
+}
+
+extern Architecture arch;
+extern Filesystem fsm;
 
 char *Process::default_tty = "/dev/tty";
 u32 Process::proc_pid = 0;

@@ -1,10 +1,14 @@
 #include <os.h>
+#include <device.h>
+#include <filesystem.h>
+
+extern Filesystem fsm;
 
 Device::~Device()
 {
 }
 
-Device::Device(char *n) : File(n, TYPE_DEVICE)
+Device::Device(const char *n) : File((char*)n, TYPE_DEVICE)
 {
   fsm.addFile("/dev", this); // add the device to the filesystem under /dev
 }
@@ -19,12 +23,12 @@ u32 Device::close()
   return NOT_DEFINED; // placeholder for close operation
 }
 
-u32 Device::read(u8 *buffer, u32 size)
+u32 Device::read(u32 pos, u8 *buffer, u32 size)
 {
   return NOT_DEFINED; // placeholder for read operation
 }
 
-u32 Device::write(u8 *buffer, u32 size)
+u32 Device::write(u32 pos, u8 *buffer, u32 size)
 {
   return NOT_DEFINED; // placeholder for write operation
 }
