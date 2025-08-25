@@ -1,5 +1,6 @@
 #include <os.h>
 #include <vmm.h>
+#include <runtime/buddy.h>
 
 VMM vmm;
 struct page_directory *kernel_directory = 0;
@@ -45,6 +46,8 @@ void VMM::init() {
     
     current_directory = kernel_directory;
     switch_page_directory(kernel_directory);
+    
+    init_buddy_allocator();
     
     io.print("[VMM] Paging enabled with %d frames available\n", frame_count - frames_used);
 }
