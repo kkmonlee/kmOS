@@ -252,7 +252,7 @@ void SlabAllocator::slab_destroy(struct slab_cache *cache, struct slab *slab) {
     cache->num_slabs--;
 }
 
-void *SlabAllocator::slab_alloc_obj(struct slab_cache *cache, struct slab *slab) {
+void *SlabAllocator::slab_alloc_obj(struct slab_cache * /*cache*/, struct slab *slab) {
     if (!slab->freelist) return nullptr;
     
     struct slab_obj *obj = slab->freelist;
@@ -267,7 +267,7 @@ void *SlabAllocator::slab_alloc_obj(struct slab_cache *cache, struct slab *slab)
     return (void*)obj;
 }
 
-void SlabAllocator::slab_free_obj(struct slab_cache *cache, struct slab *slab, void *obj) {
+void SlabAllocator::slab_free_obj(struct slab_cache * /*cache*/, struct slab *slab, void *obj) {
     struct slab_obj *slab_obj = (struct slab_obj*)obj;
     slab_obj->next = slab->freelist;
     slab_obj->magic = SLAB_MAGIC;

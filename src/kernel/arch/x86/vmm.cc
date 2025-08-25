@@ -2,6 +2,9 @@
 #include <vmm.h>
 #include <runtime/buddy.h>
 #include <runtime/slab.h>
+#include <runtime/slob.h>
+#include <runtime/slub.h>
+#include <runtime/unified_alloc.h>
 #include <cow.h>
 
 VMM vmm;
@@ -51,6 +54,9 @@ void VMM::init() {
     
     init_buddy_allocator();
     init_slab_allocator();
+    init_slob_allocator();
+    init_slub_allocator();
+    init_unified_allocator(SYS_MODE_DESKTOP);
     init_cow_manager();
     
     io.print("[VMM] Paging enabled with %d frames available\n", frame_count - frames_used);

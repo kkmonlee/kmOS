@@ -5,6 +5,9 @@ RUNTIME_OBJS := \
 	runtime/string.o \
 	runtime/buffer.o \
 	runtime/buddy.o \
-	runtime/slab.o
+	runtime/slab.o \
+	runtime/slob.o \
+	runtime/slub.o \
+	runtime/unified_alloc.o
 
 OBJS := $(OBJS) $(RUNTIME_OBJS)
