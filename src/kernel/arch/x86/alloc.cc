@@ -39,7 +39,7 @@ extern "C" {
     }
 
 extern "C" {
-    void *ksbrk(int n) {
+    void *ksbrk(int /*n*/) {
         return unified_allocator.alloc_pages(0);
     }
 

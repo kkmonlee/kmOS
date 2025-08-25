@@ -33,7 +33,7 @@ IO::IO() {
     real_screen = (char*)RAMSCREEN;
 }
 
-IO::IO(u32 flag) {
+IO::IO(u32 /*flag*/) {
     x = 0;
     yl = 0;
     kattr = 0x07;

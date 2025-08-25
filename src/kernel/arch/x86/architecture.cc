@@ -30,11 +30,11 @@ void Architecture::addProcess(Process* p) {
     pcurrent = p;
 }
 
-u32 Architecture::getArg(u32 argnum) {
+u32 Architecture::getArg(u32 /*argnum*/) {
     return 0;
 }
 
-int Architecture::createProc(process_st* info, char* file, int argc, char** argv) {
+int Architecture::createProc(process_st* /*info*/, char* /*file*/, int /*argc*/, char** /*argv*/) {
     return 0;
 }
 

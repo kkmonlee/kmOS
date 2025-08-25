@@ -15,8 +15,8 @@ enum
 class File
 {
 public:
-  File(char *n, u8 t);
-  ~File();
+  File(const char *n, u8 t);
+  virtual ~File();
 
   virtual u32 open(u32 flag);
   virtual u32 close();
@@ -29,7 +29,7 @@ public:
   void checkName();
 
   u32 addChild(File *n);
-  File *createChild(char *n, u8 t);
+  File *createChild(const char *n, u8 t);
   File *find(char *n);
   u32 mmap(u32 sizee, u32 flags, u32 offset, u32 prot);
 

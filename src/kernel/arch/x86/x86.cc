@@ -12,7 +12,7 @@ extern "C"
 {
 
   // reads CPU information using CPUID instruction
-  regs_t cpu_cpuid(int code)
+  regs_t cpu_cpuid(int /*code*/)
   {
     regs_t r;
     r.eax = 0;
