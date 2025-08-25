@@ -56,6 +56,7 @@ void VMM::init() {
     init_slab_allocator();
     init_slob_allocator();
     init_slub_allocator();
+    init_stack_allocator();
     init_unified_allocator(SYS_MODE_DESKTOP);
     init_cow_manager();
     
