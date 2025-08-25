@@ -64,14 +64,13 @@ public:
     void switch_page_directory(struct page_directory *pd);
     u32 alloc_frame();
     void free_frame(u32 frame_addr);
+    struct page_table_entry *get_page_table(struct page_directory *pd, u32 virtual_addr, int create);
     
 private:
     struct page_frame *free_frames;
     u32 *frame_bitmap;
     u32 frame_count;
     u32 frames_used;
-    
-    struct page_table_entry *get_page_table(struct page_directory *pd, u32 virtual_addr, int create);
 };
 
 extern VMM vmm;

@@ -43,8 +43,6 @@ private:
     struct buddy_block *find_buddy(struct buddy_block *block, u32 order);
     void split_block(struct buddy_block *block, u32 order, u32 target_order);
     void coalesce_block(struct buddy_block *block, u32 order);
-    u32 block_to_index(struct buddy_block *block);
-    struct buddy_block *index_to_block(u32 index);
 };
 
 extern BuddyAllocator buddy_allocator;

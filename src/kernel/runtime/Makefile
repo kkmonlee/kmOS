@@ -4,6 +4,7 @@ RUNTIME_OBJS := \
 	runtime/memory.o \
 	runtime/string.o \
 	runtime/buffer.o \
-	runtime/buddy.o
+	runtime/buddy.o \
+	runtime/slab.o
 
 OBJS := $(OBJS) $(RUNTIME_OBJS)

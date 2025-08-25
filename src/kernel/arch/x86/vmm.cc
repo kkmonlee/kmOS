@@ -1,6 +1,8 @@
 #include <os.h>
 #include <vmm.h>
 #include <runtime/buddy.h>
+#include <runtime/slab.h>
+#include <cow.h>
 
 VMM vmm;
 struct page_directory *kernel_directory = 0;
@@ -48,6 +50,8 @@ void VMM::init() {
     switch_page_directory(kernel_directory);
     
     init_buddy_allocator();
+    init_slab_allocator();
+    init_cow_manager();
     
     io.print("[VMM] Paging enabled with %d frames available\n", frame_count - frames_used);
 }
@@ -169,10 +173,15 @@ u32 VMM::get_physical_addr(struct page_directory *pd, u32 virtual_addr) {
 }
 
 int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
-    // Check if this is a demand paging scenario
+    if (fault_addr >= USER_OFFSET && fault_addr < USER_STACK) {
+        int cow_result = cow_handle_page_fault(fault_addr, error_code);
+        if (cow_result == 0) {
+            return 0;
+        }
+    }
+    
     if (fault_addr >= KERN_HEAP && fault_addr < KERN_HEAP_LIM) {
-        // Kernel heap access - allocate page on demand
-        u32 page_addr = fault_addr & ~0xFFF;  // Align to page boundary
+        u32 page_addr = fault_addr & ~0xFFF;
         u32 frame = alloc_frame();
         if (frame == 0) {
             io.print("[VMM] Page fault: Out of memory for kernel heap\n");
@@ -185,10 +194,9 @@ int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
             return -1;
         }
         
-        return 0;  // Successfully handled
+        return 0;
     }
     
-    // Unhandled page fault
     io.print("[VMM] Page fault at %x, error %x\n", fault_addr, error_code);
     return -1;
 }
