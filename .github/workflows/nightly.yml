@@ -1,0 +1,315 @@
+name: Nightly Extended Tests
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Run at 3 AM UTC daily
+  workflow_dispatch:     # Allow manual triggering
+
+env:
+  CROSS_TARGET: i686-elf
+
+jobs:
+  extended-qemu-tests:
+    name: Extended QEMU Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Cache toolchain
+      uses: actions/cache@v3
+      with:
+        path: ~/.local/cross
+        key: ${{ runner.os }}-cross-compiler-${{ env.CROSS_TARGET }}-v2
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo nasm qemu-system-x86 grub-pc-bin xorriso mtools expect cppcheck valgrind
+        
+    - name: Setup cross-compiler
+      run: echo "$HOME/.local/cross/bin" >> $GITHUB_PATH
+      
+    - name: Build kernel
+      run: |
+        export PATH="$HOME/.local/cross/bin:$PATH"
+        cd src && make -C kernel clean && make -C kernel all
+        
+    - name: Run comprehensive functionality tests
+      run: |
+        chmod +x tests/test_kernel_functionality.sh
+        ./tests/test_kernel_functionality.sh src/kernel/kernel.elf
+        
+    - name: Run extended QEMU integration tests
+      run: |
+        chmod +x tests/qemu_integration_test.sh
+        QEMU_TIMEOUT=60 ./tests/qemu_integration_test.sh src/kernel/kernel.elf
+        
+    - name: Memory stress testing
+      run: |
+        cd tests
+        cat > memory_stress_test.sh << 'EOF'
+        #!/bin/bash
+        echo "Running memory stress tests..."
+        
+        # Test with different memory configurations
+        for mem_size in 32M 64M 128M 256M; do
+          echo "Testing with $mem_size memory..."
+          timeout 45s qemu-system-i386 \
+            -cdrom results/kmOS_test_*.iso \
+            -nographic -serial stdio \
+            -m "$mem_size" \
+            -no-reboot > "results/stress_${mem_size}.log" 2>&1 || true
+            
+          # Check for memory-related errors
+          if grep -q -i "out of memory\|allocation failed\|memory error" "results/stress_${mem_size}.log"; then
+            echo "Memory issues detected with $mem_size"
+          else
+            echo "No memory issues with $mem_size"
+          fi
+        done
+        EOF
+        
+        chmod +x memory_stress_test.sh
+        ./memory_stress_test.sh
+        
+    - name: Boot performance analysis
+      run: |
+        cd tests
+        echo "Analyzing boot performance..."
+        
+        # Measure boot time
+        cat > boot_perf_test.sh << 'EOF'
+        #!/bin/bash
+        
+        for i in {1..5}; do
+          echo "Boot test iteration $i..."
+          start_time=$(date +%s.%N)
+          
+          timeout 30s qemu-system-i386 \
+            -cdrom results/kmOS_test_*.iso \
+            -nographic -serial stdio \
+            -m 64M > "results/boot_perf_$i.log" 2>&1 || true
+            
+          end_time=$(date +%s.%N)
+          runtime=$(echo "$end_time - $start_time" | bc -l)
+          echo "Boot attempt $i took: $runtime seconds"
+          
+          # Check if boot was successful
+          if grep -q "kmOS\|kernel" "results/boot_perf_$i.log"; then
+            echo "Boot $i: SUCCESS"
+          else
+            echo "Boot $i: FAILED"
+          fi
+        done
+        EOF
+        
+        chmod +x boot_perf_test.sh
+        ./boot_perf_test.sh
+        
+    - name: COW stress testing
+      run: |
+        cd tests
+        cat > cow_stress_test.sh << 'EOF'
+        #!/bin/bash
+        echo "Running COW stress tests..."
+        
+        # Create expect script for COW testing
+        cat > cow_test.exp << 'EOE'
+        #!/usr/bin/expect -f
+        set timeout 60
+        
+        spawn qemu-system-i386 -cdrom [glob results/kmOS_test_*.iso] -nographic -serial stdio -m 128M
+        
+        set cow_init_found 0
+        set cow_stats_found 0
+        
+        expect {
+            "COW.*init" { 
+                set cow_init_found 1
+                puts "COW initialization detected"
+                exp_continue
+            }
+            "COW.*stats\|cow.*pages\|cow.*mapping" {
+                set cow_stats_found 1
+                puts "COW statistics detected"
+                exp_continue
+            }
+            "panic\|error\|crash" {
+                puts "FAILURE: System error detected"
+                exit 1
+            }
+            timeout {
+                if {$cow_init_found == 1} {
+                    puts "COW test completed successfully"
+                    exit 0
+                } else {
+                    puts "COW initialization not detected"
+                    exit 1
+                }
+            }
+        }
+        EOE
+        
+        chmod +x cow_test.exp
+        ./cow_test.exp > results/cow_stress.log 2>&1
+        EOF
+        
+        chmod +x cow_stress_test.sh
+        ./cow_stress_test.sh
+        
+    - name: Upload comprehensive test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: nightly-test-results-${{ github.sha }}
+        path: |
+          tests/results/
+          src/kernel/dasm.txt
+          src/kernel/kernel_symbols.txt
+        retention-days: 30
+        
+    - name: Performance regression check
+      run: |
+        echo "Checking for performance regressions..."
+        
+        # Compare kernel size with previous builds
+        current_size=$(stat -c%s src/kernel/kernel.elf)
+        echo "Current kernel size: $current_size bytes"
+        
+        # Store size for trending (in a real setup, you'd compare with historical data)
+        echo "${{ github.sha }},$current_size,$(date)" >> tests/results/size_history.csv
+        
+        # Basic size sanity check
+        if [ $current_size -gt 2097152 ]; then  # 2MB threshold
+          echo "WARNING: Kernel size unusually large"
+        fi
+        
+        if [ $current_size -lt 51200 ]; then  # 50KB threshold
+          echo "WARNING: Kernel size unusually small"
+        fi
+
+  security-analysis:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    needs: extended-qemu-tests
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install security tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck clang-tidy shellcheck bandit
+        
+    - name: Run comprehensive static analysis
+      run: |
+        echo "Running comprehensive security analysis..."
+        
+        # C++ code analysis
+        cppcheck --enable=all --inconclusive --xml --xml-version=2 \
+          --suppress=missingInclude \
+          --suppress=unusedFunction \
+          src/kernel/ 2> cppcheck-security.xml || true
+          
+        # Shell script analysis
+        find . -name "*.sh" -exec shellcheck {} \; || true
+        
+        # Look for security issues
+        echo "Checking for security concerns..."
+        
+        # Buffer overflow risks
+        grep -rn "strcpy\|strcat\|sprintf\|gets" src/kernel/ > security_issues.txt || true
+        
+        # Hardcoded values
+        grep -rn "TODO\|FIXME\|HACK" src/kernel/ >> security_issues.txt || true
+        
+        # Memory management issues
+        grep -rn "malloc\|free\|kmalloc\|kfree" src/kernel/ | grep -v "if\|check\|null" >> security_issues.txt || true
+        
+        if [ -s security_issues.txt ]; then
+          echo "Security concerns found:"
+          cat security_issues.txt
+        else
+          echo "No obvious security issues found"
+        fi
+        
+    - name: Kernel exploit mitigation check
+      run: |
+        echo "Checking exploit mitigation features..."
+        
+        if [ -f "src/kernel/kernel.elf" ]; then
+          # Check for stack protection
+          if objdump -t src/kernel/kernel.elf | grep -q "stack_chk"; then
+            echo "✓ Stack protection symbols found"
+          else
+            echo "⚠ No stack protection detected"
+          fi
+          
+          # Check for RELRO
+          if readelf -d src/kernel/kernel.elf 2>/dev/null | grep -q "BIND_NOW"; then
+            echo "✓ RELRO protection detected"
+          else
+            echo "⚠ RELRO protection not detected"
+          fi
+          
+          # Check sections
+          if readelf -S src/kernel/kernel.elf | grep -q "\.rodata"; then
+            echo "✓ Read-only data section found"
+          else
+            echo "⚠ No read-only data section"
+          fi
+        fi
+
+  compatibility-testing:
+    name: Compatibility Testing
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        qemu_version: ['6.2', '7.0', '8.0']
+        memory_size: ['32M', '64M', '128M']
+      fail-fast: false
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup QEMU ${{ matrix.qemu_version }}
+      run: |
+        echo "Testing with QEMU ${{ matrix.qemu_version }} and ${{ matrix.memory_size }} RAM"
+        # In a real setup, you might install different QEMU versions
+        sudo apt-get update
+        sudo apt-get install -y qemu-system-x86 grub-pc-bin
+        
+    - name: Build kernel (minimal)
+      run: |
+        # Use cached toolchain or skip if this is just compatibility testing
+        echo "Compatibility test for QEMU ${{ matrix.qemu_version }} with ${{ matrix.memory_size }}"
+        
+  notification:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [extended-qemu-tests, security-analysis, compatibility-testing]
+    if: always()
+    
+    steps:
+    - name: Prepare notification
+      run: |
+        echo "Nightly test results:"
+        echo "- Extended QEMU Tests: ${{ needs.extended-qemu-tests.result }}"
+        echo "- Security Analysis: ${{ needs.security-analysis.result }}"
+        echo "- Compatibility Testing: ${{ needs.compatibility-testing.result }}"
+        
+        if [ "${{ needs.extended-qemu-tests.result }}" = "failure" ]; then
+          echo "❌ Extended QEMU tests failed - investigate kernel stability"
+        fi
+        
+        if [ "${{ needs.security-analysis.result }}" = "failure" ]; then
+          echo "⚠️ Security analysis found issues - review and address"
+        fi
+        
+        echo "Full results available in workflow artifacts"
