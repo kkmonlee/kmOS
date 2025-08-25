@@ -56,6 +56,7 @@ void VMM::init() {
     init_slab_allocator();
     init_slob_allocator();
     init_slub_allocator();
+    init_stack_allocator();
     init_unified_allocator(SYS_MODE_DESKTOP);
     init_cow_manager();
     
@@ -210,6 +211,28 @@ int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
 void VMM::switch_page_directory(struct page_directory *pd) {
     current_directory = pd;
     switch_page_directory_asm(pd->physical_address);
+}
+
+void VMM::destroy_page_directory(struct page_directory *pd) {
+    if (!pd) return;
+    
+    for (int i = 0; i < 1024; i++) {
+        if (pd->tables[i].present && pd->page_tables[i]) {
+            for (int j = 0; j < 1024; j++) {
+                if (pd->page_tables[i][j].present) {
+                    u32 frame_addr = pd->page_tables[i][j].frame << 12;
+                    free_frame(frame_addr);
+                }
+            }
+            kfree(pd->page_tables[i]);
+        }
+    }
+    
+    if (pd->physical_address) {
+        free_frame(pd->physical_address);
+    }
+    
+    kfree(pd);
 }
 
 void init_vmm() {

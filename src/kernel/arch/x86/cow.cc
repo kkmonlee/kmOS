@@ -57,25 +57,42 @@ int COWManager::break_cow(struct page_directory *pd, u32 virtual_addr) {
     u32 old_physical = vmm.get_physical_addr(pd, virtual_addr);
     if (!old_physical) return -1;
     
+    struct cow_page *cow_page = find_cow_page(old_physical);
+    if (!cow_page) {
+        struct page_table_entry *table = vmm.get_page_table(pd, virtual_addr, 0);
+        if (table) {
+            u32 page_idx = VADDR_PT_OFFSET(virtual_addr);
+            table[page_idx].writable = 1;
+            asm volatile("mov %0, %%cr3" :: "r"(pd->physical_address));
+            return 0;
+        }
+        return -1;
+    }
+    
+    if (cow_page->ref_count == 1) {
+        struct page_table_entry *table = vmm.get_page_table(pd, virtual_addr, 0);
+        if (table) {
+            u32 page_idx = VADDR_PT_OFFSET(virtual_addr);
+            table[page_idx].writable = 1;
+            dec_cow_ref(cow_page);
+            asm volatile("mov %0, %%cr3" :: "r"(pd->physical_address));
+            return 0;
+        }
+        return -1;
+    }
+    
     u32 new_physical = vmm.alloc_frame();
     if (!new_physical) return -1;
     
-    u8 *old_page = (u8*)old_physical;
-    u8 *new_page = (u8*)new_physical;
-    
     for (int i = 0; i < 4096; i++) {
-        new_page[i] = old_page[i];
+        ((char*)new_physical)[i] = ((char*)old_physical)[i];
     }
     
     vmm.unmap_page(pd, virtual_addr);
     int result = vmm.map_page(pd, virtual_addr, new_physical, PG_PRESENT | PG_WRITE | PG_USER);
     
     if (result == 0) {
-        struct cow_page *cow_page = find_cow_page(old_physical);
-        if (cow_page) {
-            dec_cow_ref(cow_page);
-        }
-        
+        dec_cow_ref(cow_page);
         asm volatile("mov %0, %%cr3" :: "r"(pd->physical_address));
     } else {
         vmm.free_frame(new_physical);
@@ -291,18 +308,82 @@ struct cow_mapping *COWManager::find_cow_mapping(struct page_directory *pd, u32 
     return nullptr;
 }
 
+void COWManager::cleanup_process_cow(struct page_directory *pd) {
+    struct cow_mapping *mapping = cow_mappings;
+    struct cow_mapping *next;
+    
+    while (mapping) {
+        next = mapping->next;
+        if (mapping->owner_pd == pd) {
+            if (mapping->cow_page) {
+                dec_cow_ref(mapping->cow_page);
+            }
+            destroy_cow_mapping(mapping);
+        }
+        mapping = next;
+    }
+}
+
+void COWManager::optimize_cow_pages() {
+    struct cow_page *page = cow_pages;
+    struct cow_page *next;
+    u32 optimized = 0;
+    
+    while (page) {
+        next = page->next;
+        if (page->ref_count == 0) {
+            vmm.free_frame(page->physical_addr);
+            free_cow_page(page);
+            optimized++;
+        }
+        page = next;
+    }
+    
+    if (optimized > 0) {
+        io.print("[COW] Optimized %d unused COW pages\n", optimized);
+    }
+}
+
+int COWManager::validate_cow_integrity() {
+    u32 errors = 0;
+    struct cow_page *page = cow_pages;
+    
+    while (page) {
+        if (page->magic != COW_MAGIC) {
+            io.print("[COW] ERROR: Invalid magic in COW page %x\n", page->physical_addr);
+            errors++;
+        }
+        if (page->ref_count > MAX_COW_REFS) {
+            io.print("[COW] ERROR: Invalid ref_count %d in COW page %x\n", 
+                     page->ref_count, page->physical_addr);
+            errors++;
+        }
+        page = page->next;
+    }
+    
+    return errors;
+}
+
 void COWManager::print_stats() {
     io.print("[COW] Statistics:\n");
     io.print("  Total COW pages: %d\n", total_cow_pages);
     io.print("  Total COW mappings: %d\n", total_cow_mappings);
     
     u32 total_refs = 0;
+    u32 shared_pages = 0;
     struct cow_page *page = cow_pages;
     while (page) {
         total_refs += page->ref_count;
+        if (page->ref_count > 1) {
+            shared_pages++;
+        }
         page = page->next;
     }
     io.print("  Total references: %d\n", total_refs);
+    io.print("  Shared pages: %d\n", shared_pages);
+    
+    u32 memory_saved = shared_pages * 4096;
+    io.print("  Memory saved: %d bytes\n", memory_saved);
 }
 
 void init_cow_manager() {
@@ -316,5 +397,21 @@ extern "C" {
     
     int cow_handle_page_fault(u32 fault_addr, u32 error_code) {
         return cow_manager.handle_cow_fault(current_directory, fault_addr, error_code);
+    }
+    
+    void cow_cleanup_process(struct page_directory *pd) {
+        cow_manager.cleanup_process_cow(pd);
+    }
+    
+    void cow_optimize() {
+        cow_manager.optimize_cow_pages();
+    }
+    
+    int cow_validate() {
+        return cow_manager.validate_cow_integrity();
+    }
+    
+    void cow_print_stats() {
+        cow_manager.print_stats();
     }
 }

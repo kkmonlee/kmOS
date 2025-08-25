@@ -50,5 +50,9 @@ void Architecture::change_process_father(Process* child, Process* new_father) {
     (void)new_father;
 }
 
+struct page_directory *Architecture::get_current_page_directory() {
+    return current_directory;
+}
+
 void Architecture::destroy_all_zombie() {
 }

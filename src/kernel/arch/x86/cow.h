@@ -59,6 +59,9 @@ public:
     int map_pages(struct page_directory *pd, u32 start_addr, u32 end_addr, u32 flags);
     int unmap_pages(struct page_directory *pd, u32 start_addr, u32 end_addr);
     
+    void cleanup_process_cow(struct page_directory *pd);
+    void optimize_cow_pages();
+    int validate_cow_integrity();
     void print_stats();
     
 private:
@@ -88,6 +91,10 @@ extern "C" {
     void init_cow_manager();
     int cow_fork_mm(struct page_directory *child_pd, struct page_directory *parent_pd);
     int cow_handle_page_fault(u32 fault_addr, u32 error_code);
+    void cow_cleanup_process(struct page_directory *pd);
+    void cow_optimize();
+    int cow_validate();
+    void cow_print_stats();
 }
 
 #endif

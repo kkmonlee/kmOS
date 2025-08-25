@@ -6,6 +6,7 @@
 #include <api/dev/proc.h>
 #include <signal.h>
 #include <config.h>
+#include <cow.h>
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
@@ -21,6 +22,13 @@ u32 Process::proc_pid = 0;
 /* Destructor */
 Process::~Process()
 {
+  extern void cow_cleanup_process(struct page_directory *pd);
+  
+  if (info.pd) {
+    cow_cleanup_process(info.pd);
+    vmm.destroy_page_directory(info.pd);
+  }
+  
   delete ipc;
   arch.change_process_father(this, pparent); // Change parent of child processes
 }
@@ -120,11 +128,44 @@ u32 Process::wait()
 
 int Process::fork()
 {
-  if (pparent != NULL)
-  {
-    pparent->sendSignal(SIGCHLD);
+  Process *child = new Process("forked_process");
+  if (!child) {
+    return -1;
   }
-  return 0;
+  
+  child->pparent = this;
+  child->setState(CHILD);
+  child->setCurrentDir(getCurrentDir());
+  
+  for (int i = 0; i < CONFIG_MAX_FILE; i++) {
+    if (openfp[i].fp != NULL) {
+      child->openfp[i] = openfp[i];
+    }
+  }
+  
+  struct page_directory *child_pd = vmm.create_page_directory();
+  if (!child_pd) {
+    delete child;
+    return -1;
+  }
+  
+  if (cow_fork_mm(child_pd, arch.get_current_page_directory()) != 0) {
+    vmm.destroy_page_directory(child_pd);
+    delete child;
+    return -1;
+  }
+  
+  child->info.pd = child_pd;
+  
+  int ret = arch.createProc(&child->info, nullptr, 0, nullptr);
+  if (ret == 1) {
+    if (pparent != NULL) {
+      pparent->sendSignal(SIGCHLD);
+    }
+    return child->pid;
+  } else {
+    return 0;
+  }
 }
 
 u32 Process::create(char *file, int argc, char **argv)

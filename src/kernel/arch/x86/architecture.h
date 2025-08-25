@@ -33,6 +33,7 @@ public:
   void destroy_all_zombie();                                           // Destroy all zombie processes
   void change_process_father(Process *p, Process *pere);               // Change the parent of a process
   int fork(process_st *info, process_st *father);                      // Fork a process
+  struct page_directory *get_current_page_directory();                 // Get current page directory
 
   /** Architecture public attributes **/
   Process *pcurrent; // Pointer to the current process
