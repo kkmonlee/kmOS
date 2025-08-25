@@ -17,6 +17,9 @@ typedef signed short 	s16;
 typedef signed int 		s32;
 typedef signed long long	s64;
 
+typedef float f32;
+typedef double f64;
+
 
 typedef unsigned char u_char;
 
@@ -32,6 +35,8 @@ typedef int gid_t;
 typedef int blksize_t;
 typedef s64 blkcnt_t;
 #define time_t s64
+
+typedef u32 uintptr_t;
 
 struct stat_fs {
     dev_t st_dev;

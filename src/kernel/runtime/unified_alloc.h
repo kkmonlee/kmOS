@@ -6,6 +6,7 @@
 #include <runtime/slab.h>
 #include <runtime/slob.h>
 #include <runtime/slub.h>
+#include <runtime/stack.h>
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096
@@ -15,13 +16,16 @@
 #define ALLOC_POLICY_SLAB   0x02
 #define ALLOC_POLICY_SLOB   0x04
 #define ALLOC_POLICY_SLUB   0x08
-#define ALLOC_POLICY_AUTO   0x10
+#define ALLOC_POLICY_STACK  0x10
+#define ALLOC_POLICY_AUTO   0x20
 
 #define ALLOC_FLAG_KERNEL   0x01
 #define ALLOC_FLAG_USER     0x02
 #define ALLOC_FLAG_DMA      0x04
 #define ALLOC_FLAG_ATOMIC   0x08
 #define ALLOC_FLAG_ZERO     0x10
+#define ALLOC_FLAG_TEMP     0x20
+#define ALLOC_FLAG_SCOPED   0x40
 
 enum alloc_type {
     ALLOC_TINY = 0,      // < 64 bytes
@@ -50,6 +54,7 @@ struct alloc_stats {
     u32 slab_allocs;
     u32 slob_allocs;
     u32 slub_allocs;
+    u32 stack_allocs;
     
     u32 cache_hits;
     u32 cache_misses;
@@ -80,6 +85,11 @@ public:
     
     void *alloc_pages(u32 order, u32 flags = 0);
     void free_pages(void *ptr, u32 order);
+    
+    void *stack_alloc(u32 size, u32 flags = 0);
+    void stack_reset();
+    void *stack_checkpoint();
+    void stack_restore(void *checkpoint);
     
     void enable_debug_tracking();
     void disable_debug_tracking();

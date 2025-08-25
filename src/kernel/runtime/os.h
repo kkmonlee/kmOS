@@ -1,6 +1,6 @@
-#include <types.h>
-#include <file.h>
-#include <filesystem.h>
+#include <runtime/types.h>
+#include <core/file.h>
+#include <core/filesystem.h>
 
 #ifndef KMOS_OS_H
 #define KMOS_OS_H

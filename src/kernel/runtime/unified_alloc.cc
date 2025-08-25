@@ -24,16 +24,16 @@ void UnifiedAllocator::init(enum system_mode mode) {
     
     switch (mode) {
         case SYS_MODE_EMBEDDED:
-            policy_mask = ALLOC_POLICY_SLOB | ALLOC_POLICY_BUDDY;
+            policy_mask = ALLOC_POLICY_SLOB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK;
             break;
         case SYS_MODE_DESKTOP:
-            policy_mask = ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_AUTO;
+            policy_mask = ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK | ALLOC_POLICY_AUTO;
             break;
         case SYS_MODE_SERVER:
-            policy_mask = ALLOC_POLICY_SLUB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_AUTO;
+            policy_mask = ALLOC_POLICY_SLUB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK | ALLOC_POLICY_AUTO;
             break;
         case SYS_MODE_REALTIME:
-            policy_mask = ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY;
+            policy_mask = ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK;
             break;
     }
     
@@ -117,6 +117,10 @@ void *UnifiedAllocator::calloc(u32 count, u32 size) {
 u32 UnifiedAllocator::select_allocator(u32 size, u32 flags) {
     enum alloc_type type = classify_allocation(size);
     
+    if (flags & (ALLOC_FLAG_TEMP | ALLOC_FLAG_SCOPED) && (policy_mask & ALLOC_POLICY_STACK)) {
+        return ALLOC_POLICY_STACK;
+    }
+    
     if (flags & ALLOC_FLAG_DMA && !(policy_mask & ALLOC_POLICY_BUDDY)) {
         return ALLOC_POLICY_BUDDY;
     }
@@ -164,6 +168,10 @@ void *UnifiedAllocator::internal_alloc(u32 size, u32 /*flags*/, u32 preferred_al
             
         case ALLOC_POLICY_SLUB:
             ptr = slub_allocator.alloc(size);
+            break;
+            
+        case ALLOC_POLICY_STACK:
+            ptr = global_stack_allocator.alloc(size);
             break;
             
         case ALLOC_POLICY_BUDDY:
@@ -220,6 +228,7 @@ void UnifiedAllocator::update_stats(u32 size, u32 allocator, bool is_alloc) {
             case ALLOC_POLICY_SLAB: stats.slab_allocs++; break;
             case ALLOC_POLICY_SLOB: stats.slob_allocs++; break;
             case ALLOC_POLICY_SLUB: stats.slub_allocs++; break;
+            case ALLOC_POLICY_STACK: stats.stack_allocs++; break;
         }
     } else {
         stats.total_frees++;
@@ -309,6 +318,7 @@ void UnifiedAllocator::print_stats() {
     io.print("    Slab: %d\n", stats.slab_allocs);
     io.print("    SLOB: %d\n", stats.slob_allocs);
     io.print("    SLUB: %d\n", stats.slub_allocs);
+    io.print("    Stack: %d\n", stats.stack_allocs);
     
     io.print("  Policy switches: %d\n", stats.policy_switches);
     
@@ -323,6 +333,22 @@ void UnifiedAllocator::print_stats() {
 
 u32 UnifiedAllocator::calculate_fragmentation() {
     return 0;
+}
+
+void *UnifiedAllocator::stack_alloc(u32 size, u32 flags) {
+    return global_stack_allocator.alloc(size, STACK_ALIGNMENT);
+}
+
+void UnifiedAllocator::stack_reset() {
+    global_stack_allocator.reset();
+}
+
+void *UnifiedAllocator::stack_checkpoint() {
+    return global_stack_allocator.create_checkpoint();
+}
+
+void UnifiedAllocator::stack_restore(void *checkpoint) {
+    global_stack_allocator.restore_checkpoint(static_cast<struct stack_checkpoint*>(checkpoint));
 }
 
 bool UnifiedAllocator::validate_heap() {
@@ -352,5 +378,29 @@ void print_alloc_stats() {
 
 void validate_kernel_heap() {
     unified_allocator.validate_heap();
+}
+
+void *kstack_alloc(u32 size) {
+    return unified_allocator.stack_alloc(size);
+}
+
+void kstack_reset() {
+    unified_allocator.stack_reset();
+}
+
+void *kstack_checkpoint() {
+    return unified_allocator.stack_checkpoint();
+}
+
+void kstack_restore(void *checkpoint) {
+    unified_allocator.stack_restore(checkpoint);
+}
+
+void *kmalloc_temp(u32 size) {
+    return unified_allocator.alloc(size, ALLOC_FLAG_TEMP);
+}
+
+void *kmalloc_scoped(u32 size) {
+    return unified_allocator.alloc(size, ALLOC_FLAG_SCOPED);
 }
 }
