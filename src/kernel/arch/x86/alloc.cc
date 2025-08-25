@@ -19,37 +19,27 @@ extern "C" {
     void pd0_add_page(char *v_addr, char *p_addr, unsigned int flags);
 }
 
-    // Initialize the heap with a simple static buffer
     void init_heap() {
         struct kmalloc_header *initial_chunk;
         
         if (heap_initialized) return;
         
-        // For simplicity, use a static buffer for the heap
-        // In a real kernel, this would be proper virtual memory
-        static char heap_buffer[0x100000]; // 1MB heap buffer
+        heap_start = (char*)KERN_HEAP;
+        kern_heap = (char*)KERN_HEAP;
         
-        // Set up heap pointers
-        heap_start = heap_buffer;
-        kern_heap = heap_buffer + sizeof(heap_buffer);
-        
-        // Initialize the first chunk at the beginning of our static heap
         initial_chunk = (struct kmalloc_header *)heap_start;
-        initial_chunk->size = sizeof(heap_buffer);
+        initial_chunk->size = PAGESIZE;
         initial_chunk->used = 0;
         
+        kern_heap += PAGESIZE;
         heap_initialized = 1;
         
-        io.print("[HEAP] Heap initialized at %x with %d bytes\n", 
-                 (unsigned int)heap_buffer, (int)sizeof(heap_buffer));
+        io.print("[HEAP] Heap initialized at %x\n", (unsigned int)heap_start);
     }
 
 extern "C" {
-    // Change size of a memory segment
     void *ksbrk(int n) {
         struct kmalloc_header *chunk;
-        char *p_addr;
-        int i;
 
         if ((kern_heap + (n * PAGESIZE)) > (char *) KERN_HEAP_LIM) {
             io.print("PANIC: ksbrk(): no virtual memory left for kernel heap!\n");
@@ -57,30 +47,16 @@ extern "C" {
         }
 
         chunk = (struct kmalloc_header *) kern_heap;
-
-        for (i = 0; i < n; i++) {
-            p_addr = get_page_frame();
-            if ((int)(p_addr) < 0) {
-                io.print("PANIC: ksbrk(): no free page frame available!\n");
-                return (char *) - 1;
-            }
-
-            pd0_add_page(kern_heap, p_addr, 0);
-
-            kern_heap += PAGESIZE;
-        }
-
+        kern_heap += (n * PAGESIZE);
         chunk->size = PAGESIZE * n;
         chunk->used = 0;
 
         return chunk;
     }
 
-    // Allocate memory block
     void *kmalloc(unsigned long size) {
         if (size == 0) return 0;
         
-        // Initialize heap if not done yet
         if (!heap_initialized) {
             init_heap();
         }
@@ -125,7 +101,6 @@ extern "C" {
         return (char *) chunk + sizeof(struct kmalloc_header);
     }
 
-    // free memory block
     void kfree(void *v_addr) {
         if (v_addr == (void*)0)
             return;

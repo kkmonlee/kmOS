@@ -55,9 +55,11 @@ _asm_exc_GP:
 
 _asm_exc_PF:
     SAVE_REGS
+    push esp                ; pass register state to handler
     call isr_PF_exc
+    add esp, 4              ; remove pushed esp
     RESTORE_REGS
-    add esp, 4              ; adjust stack pointer
+    add esp, 4              ; adjust stack pointer (remove error code)
     iret
 
 global _asm_schedule

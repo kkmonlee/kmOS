@@ -1,8 +1,21 @@
 #include <os.h>
 #include <architecture.h>
+#include <vmm.h>
+
+extern "C" {
+    void enable_paging();
+}
 
 void Architecture::init() {
     io.print("[ARCH] Initializing x86 architecture\n");
+    
+    // Initialize virtual memory management
+    vmm.init();
+    
+    // Enable paging
+    enable_paging();
+    
+    io.print("[ARCH] x86 architecture initialization complete\n");
 }
 
 void Architecture::enable_interrupt() {
