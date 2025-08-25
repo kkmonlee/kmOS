@@ -105,4 +105,26 @@ fabric.properties
 
 .vagrant/
 
+# CI/CD and testing artifacts
+tests/results/
+*.iso
+*.img
+*.log
+dasm.txt
+kernel_symbols.txt
+*.exp
+boot_log.txt
+cppcheck-report.xml
+security_issues.txt
+size_history.csv
+
+# Build artifacts
+c.img
+test.iso
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# AI assistant files
 CLAUDE.md

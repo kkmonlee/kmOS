@@ -19,7 +19,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Cache toolchain
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.local/cross
         key: ${{ runner.os }}-cross-compiler-${{ env.CROSS_TARGET }}-v2
@@ -162,7 +162,7 @@ jobs:
         
     - name: Upload comprehensive test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: nightly-test-results-${{ github.sha }}
         path: |

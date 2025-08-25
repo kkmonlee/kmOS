@@ -14,8 +14,11 @@ kmOS is event-driven, preemptible, SMP-ready, and network ready.
 
 **✅ Completed Features:**
 - **Memory Management**: Full demand paging system with virtual memory
+- **Copy-on-Write (COW)**: Efficient fork() implementation with shared pages
+- **Memory Allocators**: Buddy, slab, SLOB, SLUB, and unified allocation systems
 - **Architecture**: x86-32 support with interrupt handling
 - **Build System**: Cross-compilation with i686-elf toolchain
+- **CI/CD Pipeline**: Automated testing with GitHub Actions and QEMU
 - **Kernel Core**: Monolithic kernel with modular driver model
 - **Process Management**: Basic process structures and scheduling framework
 
@@ -138,6 +141,36 @@ make -C kernel          # Build kernel only
 make -C kernel debug    # Generate symbol table
 make -C kernel dasm     # Disassemble kernel
 ```
+
+## Testing & CI/CD
+
+kmOS includes comprehensive automated testing with GitHub Actions:
+
+### Continuous Integration
+- **Automated Builds**: Cross-compiler toolchain setup and kernel compilation
+- **QEMU Testing**: Bootable ISO creation and runtime verification
+- **Symbol Analysis**: Verification of essential kernel symbols and memory management
+- **Static Analysis**: Code quality checks with cppcheck
+- **Security Scanning**: Vulnerability detection and exploit mitigation verification
+
+### Testing Scripts
+```bash
+# Run comprehensive kernel functionality tests
+./tests/test_kernel_functionality.sh src/kernel/kernel.elf
+
+# Run QEMU integration tests  
+./tests/qemu_integration_test.sh src/kernel/kernel.elf
+
+# Basic VMM verification
+./test_vmm.sh
+```
+
+### Nightly Testing
+- Extended QEMU testing with multiple configurations
+- Memory stress testing (32MB - 256MB)
+- COW functionality validation
+- Boot performance analysis
+- Compatibility testing across QEMU versions
 
 ## Screenshots
 

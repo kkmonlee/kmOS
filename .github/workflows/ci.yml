@@ -21,7 +21,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Cache cross-compiler toolchain
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-toolchain
       with:
         path: |
@@ -118,7 +118,7 @@ jobs:
         make dasm
         
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kernel-build-${{ github.sha }}
         path: |
@@ -137,7 +137,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Download kernel artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: kernel-build-${{ github.sha }}
         path: src/kernel/
@@ -229,7 +229,7 @@ jobs:
         
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: qemu-test-results-${{ github.sha }}
         path: |
@@ -276,7 +276,7 @@ jobs:
         
     - name: Upload analysis results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: static-analysis-${{ github.sha }}
         path: |
