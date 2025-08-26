@@ -4,6 +4,7 @@
 #include <runtime/types.h>
 #include <runtime/list.h>
 #include <vmm.h>
+#include <page_replacement.h>
 
 #define SWAP_ENTRY_SIZE 4096
 #define MAX_SWAP_ENTRIES 65536
@@ -97,6 +98,12 @@ public:
     void update_page_access(u32 virtual_addr);
     void add_to_lru(u32 virtual_addr);
     void remove_from_lru(u32 virtual_addr);
+    
+    // Advanced page replacement integration
+    void set_replacement_algorithm(u32 algorithm);
+    u32 get_replacement_algorithm();
+    void tune_replacement_performance();
+    struct page_descriptor* get_optimal_victim_page();
     
     void get_memory_stats(struct memory_stats *stats);
     void print_swap_stats();
