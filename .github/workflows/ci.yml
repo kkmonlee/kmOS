@@ -185,26 +185,17 @@ jobs:
           exit 1
         fi
         
-        # Create bootable disk using GRUB
-        mkdir -p boot/grub
-        cp bootdisk/kernel.elf boot/
-        
-        cat > boot/grub/grub.cfg << EOF
-        set timeout=0
-        set default=0
-        
-        menuentry "kmOS Test" {
-            multiboot /kernel.elf
-            boot
-        }
-        EOF
-        
-        grub-mkrescue -o test.iso boot/
+        # Verify kernel file exists and check its properties
+        echo "Kernel file info:"
+        ls -la bootdisk/kernel.elf
+        file bootdisk/kernel.elf || echo "file command not available"
         
     - name: Test kernel boot sequence
       run: |
         cd src/sdk
-        timeout 30s qemu-system-i386 -cdrom test.iso -nographic -monitor null -serial file:boot_log.txt || true
+        # Run QEMU directly with kernel (like the working qemu.sh script)
+        echo "Starting QEMU with direct kernel boot..."
+        timeout 10s qemu-system-i386 -kernel bootdisk/kernel.elf -m 64M -nographic -serial file:boot_log.txt -no-reboot || true
         
         # Check for successful boot indicators
         if grep -q "KMAIN" boot_log.txt; then
@@ -236,7 +227,7 @@ jobs:
         #!/usr/bin/expect -f
         set timeout 10
         
-        spawn qemu-system-i386 -cdrom test.iso -nographic -monitor null
+        spawn qemu-system-i386 -kernel bootdisk/kernel.elf -m 64M -nographic -no-reboot
         
         # Wait for kernel to boot
         expect {
