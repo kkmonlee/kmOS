@@ -17,14 +17,27 @@ struct page_directory *current_directory = 0;
 #define FRAME_SIZE 4096
 #define MAX_FRAMES 0x100000  // Support up to 4GB of RAM
 
+// Static frame bitmap to avoid kmalloc dependency during early boot
+static u32 static_frame_bitmap[MAX_FRAMES / 32];
+
+// Serial debugging functions for VMM
+static void serial_outb_vmm(unsigned short port, unsigned char data) {
+    asm volatile("outb %0, %1" : : "a"(data), "Nd"(port));
+}
+
+static void serial_print_vmm(const char* str) {
+    while (*str) {
+        serial_outb_vmm(0x3F8, *str);
+        str++;
+    }
+}
+
 void VMM::init() {
+    serial_print_vmm("[VMM] Starting VMM initialization\n");
     io.print("[VMM] Initializing virtual memory manager\n");
     
-    frame_bitmap = (u32*)kmalloc(MAX_FRAMES / 8);
-    if (!frame_bitmap) {
-        io.print("[VMM] Failed to allocate frame bitmap\n");
-        return;
-    }
+    frame_bitmap = static_frame_bitmap;
+    serial_print_vmm("[VMM] Frame bitmap assigned\n");
     
     for (int i = 0; i < MAX_FRAMES / 32; i++) {
         frame_bitmap[i] = 0;

@@ -16,11 +16,12 @@ kmOS is event-driven, preemptible, SMP-ready, and network ready.
 - **Memory Management**: Full demand paging system with virtual memory
 - **Copy-on-Write (COW)**: Efficient fork() implementation with shared pages
 - **Memory Allocators**: Buddy, slab, SLOB, SLUB, and unified allocation systems
-- **Architecture**: x86-32 support with interrupt handling
-- **Build System**: Cross-compilation with i686-elf toolchain
+- **Architecture**: x86-32 support with interrupt handling and successful boot
+- **Build System**: Cross-compilation with i686-elf toolchain and dual-mode QEMU support
 - **CI/CD Pipeline**: Automated testing with GitHub Actions and QEMU
 - **Kernel Core**: Monolithic kernel with modular driver model
 - **Process Management**: Basic process structures and scheduling framework
+- **Boot System**: Multiboot-compliant kernel with VGA and serial console output
 
 **🚧 In Development:**
 - Filesystem support (EXT2/3/4 planned)
@@ -129,17 +130,17 @@ kmOS features a sophisticated demand paging virtual memory system implemented fr
 
 ### Build Commands
 ```bash
-cd src
 make all        # Build kernel, SDK, and userland
 make clean      # Clean build artifacts
-make run        # Build and run in QEMU (requires sudo)
+make run        # Run kernel in QEMU GUI mode
+make debug      # Run kernel in terminal debug mode
 ```
 
 ### Development Commands
 ```bash
-make -C kernel          # Build kernel only
-make -C kernel debug    # Generate symbol table
-make -C kernel dasm     # Disassemble kernel
+make -C src/kernel          # Build kernel only
+make -C src/kernel debug    # Generate symbol table
+make -C src/kernel dasm     # Disassemble kernel
 ```
 
 ## Testing & CI/CD
@@ -179,9 +180,18 @@ kmOS includes comprehensive automated testing with GitHub Actions:
 
 *kmOS v0.1 - Early boot with basic kernel initialization and memory management*
 
+<img src="https://raw.githubusercontent.com/kkmonlee/kmOS/refs/heads/master/media/v0.1.1-screengrab.png" alt="kmOS v0.1.1 Boot Screen">
+
+*kmOS v0.1.1 - Successful kernel boot with architecture initialization and memory management*
+
+### Debug Mode
+The kernel now supports dual-mode execution:
+- **GUI Mode** (`make run`): QEMU window with VGA display showing boot messages
+- **Debug Mode** (`make debug`): Terminal output with detailed serial debugging information
+
 > **Note**: Additional screenshots will be added as new features are implemented, including:
 > - Memory management diagnostics
-> - Device driver functionality
+> - Device driver functionality  
 > - Filesystem operations
 > - User-space applications
 
@@ -198,13 +208,13 @@ kmOS includes comprehensive automated testing with GitHub Actions:
 
 2. **Build the kernel**:
    ```bash
-   cd src
    make all
    ```
 
-3. **Run in QEMU** (requires sudo for disk image):
+3. **Run in QEMU**:
    ```bash
-   make run
+   make run        # GUI mode with QEMU window
+   make debug      # Terminal mode with serial output
    ```
 
 ### Development

@@ -3,18 +3,31 @@
 #include <vmm.h>
 
 extern "C" {
-    void enable_paging();
+    // enable_paging() handled by VMM
+}
+
+// Serial debugging functions
+static void serial_outb(unsigned short port, unsigned char data) {
+    asm volatile("outb %0, %1" : : "a"(data), "Nd"(port));
+}
+
+static void serial_print(const char* str) {
+    while (*str) {
+        serial_outb(0x3F8, *str);
+        str++;
+    }
 }
 
 void Architecture::init() {
+    serial_print("[ARCH] Starting x86 architecture initialization\n");
+    
     io.print("[ARCH] Initializing x86 architecture\n");
     
+    serial_print("[ARCH] About to initialize VMM\n");
     // Initialize virtual memory management
     vmm.init();
     
-    // Enable paging
-    enable_paging();
-    
+    serial_print("[ARCH] VMM initialized (paging handled by VMM)\n");
     io.print("[ARCH] x86 architecture initialization complete\n");
 }
 
