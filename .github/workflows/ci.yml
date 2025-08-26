@@ -204,27 +204,28 @@ jobs:
     - name: Test kernel boot sequence
       run: |
         cd src/sdk
-        timeout 30s qemu-system-i386 -cdrom test.iso -nographic -serial stdio > boot_log.txt 2>&1 || true
+        timeout 30s qemu-system-i386 -cdrom test.iso -nographic -monitor null -serial file:boot_log.txt || true
         
         # Check for successful boot indicators
-        if grep -q "kmOS" boot_log.txt; then
+        if grep -q "KMAIN" boot_log.txt; then
           echo "✓ Kernel boot detected"
         else
           echo "✗ Kernel boot not detected"
+          echo "Boot log contents:"
           cat boot_log.txt
           exit 1
         fi
         
-        if grep -q "VMM" boot_log.txt; then
-          echo "✓ VMM initialization detected"
+        if grep -q "arch.init()" boot_log.txt; then
+          echo "✓ Architecture initialization detected"
         else
-          echo "? VMM initialization not clearly detected"
+          echo "? Architecture initialization not detected"
         fi
         
-        if grep -q "COW" boot_log.txt; then
-          echo "✓ COW manager initialization detected"
+        if grep -q "SUCCESS" boot_log.txt; then
+          echo "✓ Kernel initialization completed successfully"
         else
-          echo "? COW manager initialization not clearly detected"
+          echo "? Kernel initialization may not have completed fully"
         fi
         
     - name: Test memory management
@@ -235,11 +236,11 @@ jobs:
         #!/usr/bin/expect -f
         set timeout 10
         
-        spawn qemu-system-i386 -cdrom test.iso -nographic -serial stdio
+        spawn qemu-system-i386 -cdrom test.iso -nographic -monitor null
         
         # Wait for kernel to boot
         expect {
-            "kmOS" { 
+            "KMAIN" { 
                 send_user "Kernel booted successfully\n"
             }
             timeout {
