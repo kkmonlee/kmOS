@@ -160,6 +160,15 @@ jobs:
         # Create minimal test disk without requiring root
         qemu-img create -f raw test.img 10M
         
+        # Create bootdisk directory and copy kernel from artifact
+        mkdir -p bootdisk
+        if [ -f "../../src/sdk/bootdisk/kernel.elf" ]; then
+          cp ../../src/sdk/bootdisk/kernel.elf bootdisk/
+        elif [ -f "../../src/kernel/kernel_symbols.txt" ] && [ -f "../../src/kernel/dasm.txt" ]; then
+          # Artifacts were downloaded, look for kernel in artifact structure
+          find ../.. -name "kernel.elf" -exec cp {} bootdisk/ \;
+        fi
+        
         # Verify kernel exists
         if [ ! -f "bootdisk/kernel.elf" ]; then
           echo "Error: bootdisk/kernel.elf not found"
@@ -167,6 +176,8 @@ jobs:
           ls -la bootdisk/ || echo "bootdisk directory not found"
           echo "Available files in current directory:"
           find . -name "*.elf" -type f
+          echo "Available files in repository root:"
+          find ../.. -name "*.elf" -type f
           exit 1
         fi
         
