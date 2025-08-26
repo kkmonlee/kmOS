@@ -162,11 +162,15 @@ jobs:
         
         # Create bootdisk directory and copy kernel from artifact
         mkdir -p bootdisk
-        if [ -f "../../src/sdk/bootdisk/kernel.elf" ]; then
+        if [ -f "../../sdk/bootdisk/kernel.elf" ]; then
+          echo "Found kernel in artifact structure"
+          cp ../../sdk/bootdisk/kernel.elf bootdisk/
+        elif [ -f "../../src/sdk/bootdisk/kernel.elf" ]; then
+          echo "Found kernel in source structure"  
           cp ../../src/sdk/bootdisk/kernel.elf bootdisk/
-        elif [ -f "../../src/kernel/kernel_symbols.txt" ] && [ -f "../../src/kernel/dasm.txt" ]; then
-          # Artifacts were downloaded, look for kernel in artifact structure
-          find ../.. -name "kernel.elf" -exec cp {} bootdisk/ \;
+        else
+          echo "Looking for kernel with find command"
+          find ../.. -name "kernel.elf" -type f -exec cp {} bootdisk/ \; -quit
         fi
         
         # Verify kernel exists
