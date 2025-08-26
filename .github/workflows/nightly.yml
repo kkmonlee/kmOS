@@ -35,17 +35,17 @@ jobs:
     - name: Build kernel
       run: |
         export PATH="$HOME/.local/cross/bin:$PATH"
-        cd src && make -C kernel clean && make -C kernel all
+        make clean && make all
         
     - name: Run comprehensive functionality tests
       run: |
         chmod +x tests/test_kernel_functionality.sh
-        ./tests/test_kernel_functionality.sh src/kernel/kernel.elf
+        ./tests/test_kernel_functionality.sh src/sdk/bootdisk/kernel.elf
         
     - name: Run extended QEMU integration tests
       run: |
         chmod +x tests/qemu_integration_test.sh
-        QEMU_TIMEOUT=60 ./tests/qemu_integration_test.sh src/kernel/kernel.elf
+        QEMU_TIMEOUT=60 ./tests/qemu_integration_test.sh src/sdk/bootdisk/kernel.elf
         
     - name: Memory stress testing
       run: |
@@ -176,7 +176,14 @@ jobs:
         echo "Checking for performance regressions..."
         
         # Compare kernel size with previous builds
-        current_size=$(stat -c%s src/kernel/kernel.elf)
+        if [ -f "src/sdk/bootdisk/kernel.elf" ]; then
+          current_size=$(stat -c%s src/sdk/bootdisk/kernel.elf)
+        elif [ -f "src/kernel/kernel.elf" ]; then
+          current_size=$(stat -c%s src/kernel/kernel.elf)
+        else
+          echo "Error: kernel.elf not found"
+          exit 1
+        fi
         echo "Current kernel size: $current_size bytes"
         
         # Store size for trending (in a real setup, you'd compare with historical data)
@@ -241,27 +248,39 @@ jobs:
       run: |
         echo "Checking exploit mitigation features..."
         
-        if [ -f "src/kernel/kernel.elf" ]; then
+        # Find kernel ELF file
+        KERNEL_ELF=""
+        if [ -f "src/sdk/bootdisk/kernel.elf" ]; then
+          KERNEL_ELF="src/sdk/bootdisk/kernel.elf"
+        elif [ -f "src/kernel/kernel.elf" ]; then
+          KERNEL_ELF="src/kernel/kernel.elf"
+        fi
+        
+        if [ -n "$KERNEL_ELF" ]; then
+          echo "Analyzing kernel: $KERNEL_ELF"
+          
           # Check for stack protection
-          if objdump -t src/kernel/kernel.elf | grep -q "stack_chk"; then
+          if objdump -t "$KERNEL_ELF" | grep -q "stack_chk"; then
             echo "✓ Stack protection symbols found"
           else
             echo "⚠ No stack protection detected"
           fi
           
           # Check for RELRO
-          if readelf -d src/kernel/kernel.elf 2>/dev/null | grep -q "BIND_NOW"; then
+          if readelf -d "$KERNEL_ELF" 2>/dev/null | grep -q "BIND_NOW"; then
             echo "✓ RELRO protection detected"
           else
             echo "⚠ RELRO protection not detected"
           fi
           
           # Check sections
-          if readelf -S src/kernel/kernel.elf | grep -q "\.rodata"; then
+          if readelf -S "$KERNEL_ELF" | grep -q "\.rodata"; then
             echo "✓ Read-only data section found"
           else
             echo "⚠ No read-only data section"
           fi
+        else
+          echo "⚠ Kernel ELF file not found for analysis"
         fi
 
   compatibility-testing:

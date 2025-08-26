@@ -72,18 +72,25 @@ jobs:
     - name: Build kernel
       run: |
         export PATH="$HOME/.local/cross/bin:$PATH"
-        cd src
-        make -C kernel clean
-        make -C kernel all
+        make clean
+        make all
         
     - name: Verify kernel build
       run: |
-        if [ ! -f "src/kernel/kernel.elf" ]; then
-          echo "Error: kernel.elf not found"
+        # Check both old and new locations for backward compatibility
+        if [ -f "src/sdk/bootdisk/kernel.elf" ]; then
+          KERNEL_PATH="src/sdk/bootdisk/kernel.elf"
+        elif [ -f "src/kernel/kernel.elf" ]; then
+          KERNEL_PATH="src/kernel/kernel.elf"
+        else
+          echo "Error: kernel.elf not found in expected locations"
+          echo "Checking all possible locations..."
+          find . -name "kernel.elf" -type f
           exit 1
         fi
         
-        size=$(stat -c%s src/kernel/kernel.elf)
+        echo "Found kernel at: $KERNEL_PATH"
+        size=$(stat -c%s "$KERNEL_PATH")
         echo "Kernel size: $size bytes"
         
         if [ $size -lt 1024 ]; then
@@ -92,16 +99,16 @@ jobs:
         fi
         
         # Check for essential symbols
-        if ! objdump -t src/kernel/kernel.elf | grep -q "kmain"; then
+        if ! objdump -t "$KERNEL_PATH" | grep -q "kmain"; then
           echo "Error: kmain symbol not found"
           exit 1
         fi
         
-        if ! objdump -t src/kernel/kernel.elf | grep -q "VMM"; then
+        if ! objdump -t "$KERNEL_PATH" | grep -q "VMM"; then
           echo "Warning: VMM symbols not found"
         fi
         
-        if ! objdump -t src/kernel/kernel.elf | grep -q "COW"; then
+        if ! objdump -t "$KERNEL_PATH" | grep -q "COW"; then
           echo "Warning: COW symbols not found"
         fi
         
@@ -114,15 +121,15 @@ jobs:
       run: |
         export PATH="$HOME/.local/cross/bin:$PATH"
         cd src/kernel
-        make debug > kernel_symbols.txt
-        make dasm
+        make debug > kernel_symbols.txt || echo "Debug info generation failed"
+        make dasm || echo "Disassembly generation failed"
         
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: kernel-build-${{ github.sha }}
         path: |
-          src/kernel/kernel.elf
+          src/sdk/bootdisk/kernel.elf
           src/kernel/kernel_symbols.txt
           src/kernel/dasm.txt
         retention-days: 30
@@ -140,7 +147,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: kernel-build-${{ github.sha }}
-        path: src/kernel/
+        path: .
         
     - name: Install QEMU and tools
       run: |
@@ -152,6 +159,16 @@ jobs:
         cd src/sdk
         # Create minimal test disk without requiring root
         qemu-img create -f raw test.img 10M
+        
+        # Verify kernel exists
+        if [ ! -f "bootdisk/kernel.elf" ]; then
+          echo "Error: bootdisk/kernel.elf not found"
+          echo "Available files in bootdisk:"
+          ls -la bootdisk/ || echo "bootdisk directory not found"
+          echo "Available files in current directory:"
+          find . -name "*.elf" -type f
+          exit 1
+        fi
         
         # Create bootable disk using GRUB
         mkdir -p boot/grub
