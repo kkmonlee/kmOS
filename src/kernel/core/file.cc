@@ -213,7 +213,10 @@ u32 File::mmap(u32 sizee, u32 /*flags*/, u32 /*offset*/, u32 /*prot*/)
       pg = (struct page *)kmalloc(sizeof(struct page));
       pg->p_addr = (char *)(address);
       pg->v_addr = (char *)(address & 0xFFFFF000);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
       list_add(&pg->list, &current->pglist);
+#pragma GCC diagnostic pop
       pd_add_page(pg->v_addr, pg->p_addr, PG_USER, current->pd);
     }
     return (u32)map_memory;

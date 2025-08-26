@@ -33,15 +33,23 @@ struct page_table_entry {
     u32 dirty : 1;
     u32 pat : 1;
     u32 global : 1;
-    u32 available : 3;
+    u32 swapped : 1;
+    u32 available : 2;
     u32 frame : 20;
 } __attribute__((packed));
+
+struct swapped_page_entry {
+    u32 virtual_addr;
+    u32 swap_entry;
+    struct swapped_page_entry *next;
+};
 
 // Page directory structure
 struct page_directory {
     struct page_directory_entry tables[1024];
     struct page_table_entry *page_tables[1024];
     u32 physical_address;
+    struct swapped_page_entry *swapped_pages;
 };
 
 // Physical memory frame management
@@ -66,11 +74,17 @@ public:
     void free_frame(u32 frame_addr);
     struct page_table_entry *get_page_table(struct page_directory *pd, u32 virtual_addr, int create);
     
+    int add_swapped_page(struct page_directory *pd, u32 virtual_addr, u32 swap_entry);
+    u32 get_swap_entry(struct page_directory *pd, u32 virtual_addr);
+    void remove_swapped_page(struct page_directory *pd, u32 virtual_addr);
+    int try_reclaim_memory(u32 pages_needed);
+    
+    u32 frame_count;
+    u32 frames_used;
+    
 private:
     struct page_frame *free_frames;
     u32 *frame_bitmap;
-    u32 frame_count;
-    u32 frames_used;
 };
 
 extern VMM vmm;

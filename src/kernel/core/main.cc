@@ -13,28 +13,37 @@ Syscalls syscall;
 
 extern "C" void kmain()
 {
-    io.clear();
-    io.setColor(IO::White, IO::Black);
-    io.print("kmOS Kernel v0.1 - Starting...\n");
+    // Direct VGA memory write for immediate feedback
+    volatile unsigned short *video_memory = (volatile unsigned short*)0xB8000;
+    const char *message = "KMAIN REACHED - BASIC TEST";
     
-    io.print("[INIT] Initializing architecture...\n");
-    arch.init();
+    // Clear screen first
+    for (int i = 0; i < 80 * 25; i++) {
+        video_memory[i] = 0x0720; // Space character with light gray on black
+    }
     
-    io.print("[INIT] Initializing system...\n");
-    sys.init();
+    // Write our test message
+    for (int i = 0; message[i] != '\0'; i++) {
+        video_memory[i] = (0x0F << 8) | message[i]; // White text on black background
+    }
     
-    io.print("[INIT] Initializing filesystem...\n");
-    fsm.init();
+    // Write a second line
+    const char *msg2 = "TRYING ARCH INIT...";
+    for (int i = 0; msg2[i] != '\0'; i++) {
+        video_memory[80 + i] = (0x0E << 8) | msg2[i]; // Yellow text
+    }
     
-    io.print("[INIT] Initializing syscalls...\n");
-    syscall.init();
+    // Try basic architecture initialization
+    arch.init(); // This might be where it hangs
     
-    io.print("[INIT] Kernel initialization complete!\n");
-    io.print("[KERN] kmOS ready - entering idle loop\n");
+    // If we get here, write success message
+    const char *msg3 = "ARCH INIT SUCCESS!";
+    for (int i = 0; msg3[i] != '\0'; i++) {
+        video_memory[160 + i] = (0x0A << 8) | msg3[i]; // Green text
+    }
     
-    arch.enable_interrupt();
-    
+    // Keep kernel alive
     while(1) {
-        for(volatile int i = 0; i < 1000000; i++);
+        asm volatile("hlt");
     }
 }

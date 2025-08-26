@@ -1,5 +1,6 @@
 #include <os.h>
 #include <vmm.h>
+#include <swap.h>
 #include <runtime/buddy.h>
 #include <runtime/slab.h>
 #include <runtime/slob.h>
@@ -59,6 +60,7 @@ void VMM::init() {
     init_stack_allocator();
     init_unified_allocator(SYS_MODE_DESKTOP);
     init_cow_manager();
+    // init_swap_manager(); // Temporarily disabled for testing
     
     io.print("[VMM] Paging enabled with %d frames available\n", frame_count - frames_used);
 }
@@ -74,6 +76,7 @@ struct page_directory *VMM::create_page_directory() {
         pd->tables[i].frame = 0;
         pd->page_tables[i] = 0;
     }
+    pd->swapped_pages = nullptr;
     
     u32 phys_addr = alloc_frame();
     pd->physical_address = phys_addr;
@@ -95,6 +98,15 @@ u32 VMM::alloc_frame() {
                     return frame_idx * FRAME_SIZE;
                 }
             }
+        }
+    }
+    
+    u32 pressure = swap_manager.check_memory_pressure();
+    if (pressure >= MEMORY_PRESSURE_MEDIUM) {
+        u32 pages_to_reclaim = (pressure == MEMORY_PRESSURE_CRITICAL) ? 64 : 16;
+        int reclaimed = swap_manager.reclaim_pages(pages_to_reclaim);
+        if (reclaimed > 0) {
+            return alloc_frame();
         }
     }
     
@@ -180,15 +192,26 @@ u32 VMM::get_physical_addr(struct page_directory *pd, u32 virtual_addr) {
 }
 
 int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
+    u32 page_addr = fault_addr & ~0xFFF;
+    
+    u32 swap_entry = get_swap_entry(current_directory, page_addr);
+    if (swap_entry != 0) {
+        if (swap_manager.swap_in_page(page_addr, swap_entry) == 0) {
+            remove_swapped_page(current_directory, page_addr);
+            swap_manager.update_page_access(page_addr);
+            return 0;
+        }
+    }
+    
     if (fault_addr >= USER_OFFSET && fault_addr < USER_STACK) {
         int cow_result = cow_handle_page_fault(fault_addr, error_code);
         if (cow_result == 0) {
+            swap_manager.update_page_access(page_addr);
             return 0;
         }
     }
     
     if (fault_addr >= KERN_HEAP && fault_addr < KERN_HEAP_LIM) {
-        u32 page_addr = fault_addr & ~0xFFF;
         u32 frame = alloc_frame();
         if (frame == 0) {
             io.print("[VMM] Page fault: Out of memory for kernel heap\n");
@@ -201,6 +224,7 @@ int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
             return -1;
         }
         
+        swap_manager.add_to_lru(page_addr);
         return 0;
     }
     
@@ -228,11 +252,62 @@ void VMM::destroy_page_directory(struct page_directory *pd) {
         }
     }
     
+    struct swapped_page_entry *swapped = pd->swapped_pages;
+    while (swapped) {
+        struct swapped_page_entry *next = swapped->next;
+        swap_manager.free_swap_entry(swapped->swap_entry);
+        kfree(swapped);
+        swapped = next;
+    }
+    
     if (pd->physical_address) {
         free_frame(pd->physical_address);
     }
     
     kfree(pd);
+}
+
+int VMM::add_swapped_page(struct page_directory *pd, u32 virtual_addr, u32 swap_entry) {
+    struct swapped_page_entry *entry = (struct swapped_page_entry *)kmalloc(sizeof(struct swapped_page_entry));
+    if (!entry) return -1;
+    
+    entry->virtual_addr = virtual_addr;
+    entry->swap_entry = swap_entry;
+    entry->next = pd->swapped_pages;
+    pd->swapped_pages = entry;
+    
+    return 0;
+}
+
+u32 VMM::get_swap_entry(struct page_directory *pd, u32 virtual_addr) {
+    struct swapped_page_entry *entry = pd->swapped_pages;
+    
+    while (entry) {
+        if (entry->virtual_addr == virtual_addr) {
+            return entry->swap_entry;
+        }
+        entry = entry->next;
+    }
+    
+    return 0;
+}
+
+void VMM::remove_swapped_page(struct page_directory *pd, u32 virtual_addr) {
+    struct swapped_page_entry **entry = &pd->swapped_pages;
+    
+    while (*entry) {
+        if ((*entry)->virtual_addr == virtual_addr) {
+            struct swapped_page_entry *to_remove = *entry;
+            *entry = (*entry)->next;
+            kfree(to_remove);
+            return;
+        }
+        entry = &(*entry)->next;
+    }
+}
+
+int VMM::try_reclaim_memory(u32 pages_needed) {
+    return swap_manager.reclaim_pages(pages_needed);
 }
 
 void init_vmm() {

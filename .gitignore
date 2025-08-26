@@ -128,3 +128,13 @@ Thumbs.db
 
 # AI assistant files
 CLAUDE.md
+
+# Test files and executables
+test_swap_unit
+test_swap_unit.cc
+*_backup.cc
+*_debug.cc
+*_minimal.cc
+*_swap.cc
+test/
+tests/

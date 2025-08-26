@@ -26,10 +26,10 @@ void System::init()
   var = fsm.path("/sys/env/");
 
   // system users
-  root = new User("root");
+  root = new User(const_cast<char*>("root"));
   root->setUType(USER_ROOT);
 
-  actual = new User("liveuser");
+  actual = new User(const_cast<char*>("liveuser"));
 
   // environment variables
   uservar = new Variable("USER", "liveuser");

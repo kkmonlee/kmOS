@@ -16,7 +16,7 @@ extern "C" {
 extern Architecture arch;
 extern Filesystem fsm;
 
-char *Process::default_tty = "/dev/tty";
+char *Process::default_tty = const_cast<char*>("/dev/tty");
 u32 Process::proc_pid = 0;
 
 /* Destructor */
@@ -81,7 +81,7 @@ u32 Process::write(u32 pos, u8 *buffer, u32 sizee)
 
 u32 Process::ioctl(u32 id, u8 *buffer)
 {
-  u32 ret;
+  u32 ret = 0;
   switch (id)
   {
   case API_PROC_GET_PID:
@@ -90,6 +90,7 @@ u32 Process::ioctl(u32 id, u8 *buffer)
   case API_PROC_GET_INFO:
     reset_pinfo();
     memcpy((char *)buffer, (char *)&ppinfo, sizeof(proc_info));
+    ret = 0;
     break;
   default:
     ret = NOT_DEFINED;
@@ -128,7 +129,7 @@ u32 Process::wait()
 
 int Process::fork()
 {
-  Process *child = new Process("forked_process");
+  Process *child = new Process(const_cast<char*>("forked_process"));
   if (!child) {
     return -1;
   }
