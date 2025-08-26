@@ -16,7 +16,7 @@ struct page {
 struct page_directory;
 
 extern "C" {
-    int strlen(char *s);
+    int strlen(const char *s);
     void *memcpy(void *dest, const void *src, int n);
     void *memset(void *s, int c, int n);
     int strcmp(const char *s1, const char *s2);
@@ -38,7 +38,7 @@ static void strreplace(char *s, char a, char to)
 u32 File::inode_system = 0; // Starting inode number
 
 /* Constructor */
-File::File(char *n, u8 t)
+File::File(const char *n, u8 t)
 {
   name = (char *)kmalloc(strlen(n) + 1);
   memset(name, 0, strlen(n) + 1);
@@ -120,7 +120,7 @@ u32 File::addChild(File *n)
 /**
  * Creates and adds a child to this file/directory.
  */
-File *File::createChild(char *n, u8 t)
+File *File::createChild(const char *n, u8 t)
 {
   File *newFile = new File(n, t);
   addChild(newFile);
@@ -172,11 +172,11 @@ File *File::find(char *n)
 }
 
 // Placeholder implementations for file operations
-u32 File::open(u32 flag) { return NOT_DEFINED; }
+u32 File::open(u32 /*flag*/) { return NOT_DEFINED; }
 u32 File::close() { return NOT_DEFINED; }
-u32 File::read(u32 pos, u8 *buffer, u32 size) { return NOT_DEFINED; }
-u32 File::write(u32 pos, u8 *buffer, u32 size) { return NOT_DEFINED; }
-u32 File::ioctl(u32 id, u8 *buffer) { return NOT_DEFINED; }
+u32 File::read(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
+u32 File::write(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
+u32 File::ioctl(u32 /*id*/, u8 * /*buffer*/) { return NOT_DEFINED; }
 u32 File::remove()
 {
   delete this;
@@ -198,7 +198,7 @@ void File::scan() {
 /**
  * Memory maps the file if possible.
  */
-u32 File::mmap(u32 sizee, u32 flags, u32 offset, u32 prot)
+u32 File::mmap(u32 sizee, u32 /*flags*/, u32 /*offset*/, u32 /*prot*/)
 {
   if (map_memory != NULL)
   {
@@ -206,14 +206,17 @@ u32 File::mmap(u32 sizee, u32 flags, u32 offset, u32 prot)
     struct page *pg;
     process_st *current = arch.pcurrent->getPInfo();
 
-    for (int i = 0; i < sizee; ++i)
+    for (u32 i = 0; i < sizee; ++i)
     {
       address = (unsigned int)(map_memory + i * PAGESIZE);
 
       pg = (struct page *)kmalloc(sizeof(struct page));
       pg->p_addr = (char *)(address);
       pg->v_addr = (char *)(address & 0xFFFFF000);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
       list_add(&pg->list, &current->pglist);
+#pragma GCC diagnostic pop
       pd_add_page(pg->v_addr, pg->p_addr, PG_USER, current->pd);
     }
     return (u32)map_memory;

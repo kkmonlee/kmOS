@@ -41,6 +41,7 @@ u32 Device::ioctl(u32 id, u8 *buffer)
 u32 Device::remove()
 {
   delete this; // delete the device object
+  return 0;
 }
 
 void Device::scan()

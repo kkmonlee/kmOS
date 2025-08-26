@@ -20,6 +20,7 @@ all: $(KERNEL)
 
 $(KERNEL): $(OBJS)
 	$(LD) $(LDFLAG) -o $@ $^ 
+	@mkdir -p $(SDKDIR)/bootdisk/
 	cp $(KERNEL) $(SDKDIR)/bootdisk/
 	
 help:

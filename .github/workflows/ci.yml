@@ -1,0 +1,363 @@
+name: kmOS CI/CD
+
+on:
+  push:
+    branches: [ master, main, feature/* ]
+  pull_request:
+    branches: [ master, main ]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly build on Monday
+
+env:
+  CROSS_TARGET: i686-elf
+
+jobs:
+  build-kernel:
+    name: Build Kernel
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Cache cross-compiler toolchain
+      uses: actions/cache@v4
+      id: cache-toolchain
+      with:
+        path: |
+          /opt/cross
+          ~/.local/cross
+        key: ${{ runner.os }}-cross-compiler-${{ env.CROSS_TARGET }}-v2
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo nasm qemu-system-x86 grub-pc-bin xorriso mtools
+        
+    - name: Build cross-compiler toolchain
+      if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      run: |
+        export PREFIX="$HOME/.local/cross"
+        export TARGET=$CROSS_TARGET
+        export PATH="$PREFIX/bin:$PATH"
+        mkdir -p $PREFIX
+        
+        # Download and build binutils
+        cd /tmp
+        wget https://ftp.gnu.org/gnu/binutils/binutils-2.40.tar.gz
+        tar -xf binutils-2.40.tar.gz
+        mkdir binutils-build && cd binutils-build
+        ../binutils-2.40/configure --target=$TARGET --prefix="$PREFIX" --with-sysroot --disable-nls --disable-werror
+        make -j$(nproc)
+        make install
+        
+        # Download and build GCC
+        cd /tmp
+        wget https://ftp.gnu.org/gnu/gcc/gcc-12.2.0/gcc-12.2.0.tar.gz
+        tar -xf gcc-12.2.0.tar.gz
+        mkdir gcc-build && cd gcc-build
+        ../gcc-12.2.0/configure --target=$TARGET --prefix="$PREFIX" --disable-nls --enable-languages=c,c++ --without-headers
+        make all-gcc -j$(nproc)
+        make all-target-libgcc -j$(nproc)
+        make install-gcc
+        make install-target-libgcc
+        
+    - name: Setup cross-compiler environment
+      run: |
+        echo "$HOME/.local/cross/bin" >> $GITHUB_PATH
+        export PATH="$HOME/.local/cross/bin:$PATH"
+        which i686-elf-gcc
+        i686-elf-gcc --version
+        
+    - name: Build kernel
+      run: |
+        export PATH="$HOME/.local/cross/bin:$PATH"
+        make clean
+        make all
+        
+    - name: Verify kernel build
+      run: |
+        # Check both old and new locations for backward compatibility
+        if [ -f "src/sdk/bootdisk/kernel.elf" ]; then
+          KERNEL_PATH="src/sdk/bootdisk/kernel.elf"
+        elif [ -f "src/kernel/kernel.elf" ]; then
+          KERNEL_PATH="src/kernel/kernel.elf"
+        else
+          echo "Error: kernel.elf not found in expected locations"
+          echo "Checking all possible locations..."
+          find . -name "kernel.elf" -type f
+          exit 1
+        fi
+        
+        echo "Found kernel at: $KERNEL_PATH"
+        size=$(stat -c%s "$KERNEL_PATH")
+        echo "Kernel size: $size bytes"
+        
+        if [ $size -lt 1024 ]; then
+          echo "Error: Kernel too small, likely build failure"
+          exit 1
+        fi
+        
+        # Check for essential symbols
+        if ! objdump -t "$KERNEL_PATH" | grep -q "kmain"; then
+          echo "Error: kmain symbol not found"
+          exit 1
+        fi
+        
+        if ! objdump -t "$KERNEL_PATH" | grep -q "VMM"; then
+          echo "Warning: VMM symbols not found"
+        fi
+        
+        if ! objdump -t "$KERNEL_PATH" | grep -q "COW"; then
+          echo "Warning: COW symbols not found"
+        fi
+        
+    - name: Run basic VMM tests
+      run: |
+        chmod +x test_vmm.sh
+        ./test_vmm.sh
+        
+    - name: Generate kernel debugging info
+      run: |
+        export PATH="$HOME/.local/cross/bin:$PATH"
+        cd src/kernel
+        make debug > kernel_symbols.txt || echo "Debug info generation failed"
+        make dasm || echo "Disassembly generation failed"
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build-${{ github.sha }}
+        path: |
+          src/sdk/bootdisk/kernel.elf
+          src/kernel/kernel_symbols.txt
+          src/kernel/dasm.txt
+        retention-days: 30
+
+  test-qemu:
+    name: QEMU Integration Tests
+    runs-on: ubuntu-latest
+    needs: build-kernel
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download kernel artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: kernel-build-${{ github.sha }}
+        path: .
+        
+    - name: Install QEMU and tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-system-x86 grub-pc-bin xorriso mtools expect
+        
+    - name: Create test disk image
+      run: |
+        cd src/sdk
+        # Create minimal test disk without requiring root
+        qemu-img create -f raw test.img 10M
+        
+        # Create bootdisk directory and copy kernel from artifact
+        mkdir -p bootdisk
+        if [ -f "../../sdk/bootdisk/kernel.elf" ]; then
+          echo "Found kernel in artifact structure"
+          cp ../../sdk/bootdisk/kernel.elf bootdisk/
+        elif [ -f "../../src/sdk/bootdisk/kernel.elf" ]; then
+          echo "Found kernel in source structure"  
+          cp ../../src/sdk/bootdisk/kernel.elf bootdisk/
+        else
+          echo "Looking for kernel with find command"
+          find ../.. -name "kernel.elf" -type f -exec cp {} bootdisk/ \; -quit
+        fi
+        
+        # Verify kernel exists
+        if [ ! -f "bootdisk/kernel.elf" ]; then
+          echo "Error: bootdisk/kernel.elf not found"
+          echo "Available files in bootdisk:"
+          ls -la bootdisk/ || echo "bootdisk directory not found"
+          echo "Available files in current directory:"
+          find . -name "*.elf" -type f
+          echo "Available files in repository root:"
+          find ../.. -name "*.elf" -type f
+          exit 1
+        fi
+        
+        # Verify kernel file exists and check its properties
+        echo "Kernel file info:"
+        ls -la bootdisk/kernel.elf
+        file bootdisk/kernel.elf || echo "file command not available"
+        
+    - name: Test kernel boot sequence
+      run: |
+        cd src/sdk
+        # Run QEMU directly with kernel (like the working qemu.sh script)
+        echo "Starting QEMU with direct kernel boot..."
+        timeout 10s qemu-system-i386 -kernel bootdisk/kernel.elf -m 64M -nographic -serial file:boot_log.txt -no-reboot || true
+        
+        # Check for successful boot indicators
+        if grep -q "KMAIN" boot_log.txt; then
+          echo "✓ Kernel boot detected"
+        else
+          echo "✗ Kernel boot not detected"
+          echo "Boot log contents:"
+          cat boot_log.txt
+          exit 1
+        fi
+        
+        if grep -q "arch.init()" boot_log.txt; then
+          echo "✓ Architecture initialization detected"
+        else
+          echo "? Architecture initialization not detected"
+        fi
+        
+        if grep -q "SUCCESS" boot_log.txt; then
+          echo "✓ Kernel initialization completed successfully"
+        else
+          echo "? Kernel initialization may not have completed fully"
+        fi
+        
+    - name: Test memory management
+      run: |
+        cd src/sdk
+        # Create expect script for interactive testing
+        cat > test_memory.exp << 'EOF'
+        #!/usr/bin/expect -f
+        set timeout 10
+        
+        spawn qemu-system-i386 -kernel bootdisk/kernel.elf -m 64M -nographic -no-reboot
+        
+        # Wait for kernel to boot
+        expect {
+            "KMAIN" { 
+                send_user "Kernel booted successfully\n"
+            }
+            timeout {
+                send_user "Timeout waiting for kernel boot\n"
+                exit 1
+            }
+        }
+        
+        # Give kernel time to initialize
+        sleep 2
+        
+        # Send Ctrl+C to exit QEMU
+        send "\003"
+        expect eof
+        EOF
+        
+        chmod +x test_memory.exp
+        ./test_memory.exp
+        
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: qemu-test-results-${{ github.sha }}
+        path: |
+          src/sdk/boot_log.txt
+          src/sdk/test.iso
+        retention-days: 7
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install analysis tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck clang-tidy
+        
+    - name: Run cppcheck
+      run: |
+        cppcheck --enable=all --inconclusive --xml --xml-version=2 \
+          --suppress=missingInclude --suppress=unusedFunction \
+          src/kernel/ 2> cppcheck-report.xml || true
+          
+    - name: Run basic code quality checks
+      run: |
+        # Check for common issues
+        echo "Checking for potential issues..."
+        
+        # Check for hardcoded magic numbers
+        grep -r "0x[0-9A-Fa-f]\{6,\}" src/kernel/ || echo "No long magic numbers found"
+        
+        # Check for TODO/FIXME comments
+        grep -rn "TODO\|FIXME" src/kernel/ || echo "No TODOs/FIXMEs found"
+        
+        # Check for proper header guards
+        find src/kernel -name "*.h" | while read file; do
+          if ! grep -q "#ifndef\|#pragma once" "$file"; then
+            echo "Missing header guard in $file"
+          fi
+        done
+        
+    - name: Upload analysis results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: static-analysis-${{ github.sha }}
+        path: |
+          cppcheck-report.xml
+        retention-days: 30
+
+  security-scan:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run security analysis
+      run: |
+        echo "Running basic security checks..."
+        
+        # Check for potential buffer overflows
+        grep -rn "strcpy\|strcat\|sprintf\|gets" src/kernel/ || echo "No dangerous string functions found"
+        
+        # Check for proper bounds checking
+        grep -rn "memcpy\|memset" src/kernel/ | head -20 || echo "Memory functions review needed"
+        
+        # Check for hardcoded credentials or keys
+        grep -rni "password\|secret\|key" src/kernel/ || echo "No hardcoded secrets found"
+        
+        # Check for proper validation
+        grep -rn "malloc\|kmalloc" src/kernel/ | grep -v "if\|check\|null" || echo "Memory allocation checks look good"
+
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Check documentation
+      run: |
+        # Check if README exists and is not empty
+        if [ -f "README.md" ] && [ -s "README.md" ]; then
+          echo "✓ README.md exists and has content"
+        else
+          echo "✗ README.md missing or empty"
+        fi
+        
+        # Check if build instructions exist
+        if grep -q -i "build\|compile" README.md CLAUDE.md 2>/dev/null; then
+          echo "✓ Build instructions found"
+        else
+          echo "✗ Build instructions not found"
+        fi
+        
+        # Check for basic project info
+        if grep -q -i "kmos\|operating.*system" README.md CLAUDE.md 2>/dev/null; then
+          echo "✓ Project description found"
+        else
+          echo "? Project description unclear"
+        fi

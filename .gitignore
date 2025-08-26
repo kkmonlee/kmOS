@@ -104,3 +104,38 @@ fabric.properties
 /helloworld.c
 
 .vagrant/
+
+# CI/CD and testing artifacts
+tests/results/
+*.iso
+*.img
+*.log
+dasm.txt
+kernel_symbols.txt
+*.exp
+boot_log.txt
+cppcheck-report.xml
+security_issues.txt
+size_history.csv
+
+# Build artifacts
+c.img
+test.iso
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# AI assistant files
+CLAUDE.md
+
+# Test files and executables
+test_swap_unit
+test_swap_unit.cc
+test_page_replacement.cc
+*_backup.cc
+*_debug.cc
+*_minimal.cc
+*_swap.cc
+test/
+tests/
