@@ -1,9 +1,11 @@
 #include <os.h>
 #include <arch/x86/architecture.h>
 #include <arch/x86/io.h>
+#include <arch/x86/keyboard.h>
 #include <core/system.h>
 #include <core/filesystem.h>
 #include <core/syscalls.h>
+#include <core/shell.h>
 
 Architecture arch;
 IO io;
@@ -76,9 +78,24 @@ extern "C" void kmain()
         video_memory[160 + i] = (0x0A << 8) | msg3[i]; // Green text
     }
     
-    serial_print("KMAIN: Entering main loop\n");
+    serial_print("KMAIN: Initializing keyboard driver\n");
     
-    // Keep kernel alive
+    // Initialize keyboard for shell input
+    keyboard.init();
+    
+    serial_print("KMAIN: Initializing shell\n");
+    
+    // Initialize and run shell
+    shell.init();
+    
+    serial_print("KMAIN: Starting interactive shell\n");
+    
+    // Start the shell (this will take over control)
+    shell.run();
+    
+    serial_print("KMAIN: Shell exited, entering halt loop\n");
+    
+    // If shell exits, keep kernel alive
     while(1) {
         asm volatile("hlt");
     }

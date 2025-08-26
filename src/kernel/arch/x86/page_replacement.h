@@ -74,7 +74,7 @@ public:
     void reset_stats();
     
     int set_memory_pressure_algorithm();
-    void tune_algorithm_parameters(u32 param1, u32 param2);
+    void tune_algorithm_parameters(u32 param1, u32 param2) { (void)param1; (void)param2; }
 
 private:
     PageReplacementAlgorithm current_algorithm;
