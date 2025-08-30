@@ -12,6 +12,7 @@ CORE_OBJS := \
 	core/user.o \
 	core/modulelink.o \
 	core/socket.o \
+	core/shell.o \
 	core/main.o
 
 # append

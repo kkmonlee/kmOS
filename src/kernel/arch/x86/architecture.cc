@@ -33,6 +33,7 @@ void Architecture::init() {
 
 void Architecture::enable_interrupt() {
     io.print("[ARCH] Enabling interrupts\n");
+    asm volatile ("sti");
 }
 
 char* Architecture::detect() {
@@ -52,6 +53,7 @@ int Architecture::createProc(process_st* /*info*/, char* /*file*/, int /*argc*/,
 }
 
 void Architecture::disable_interrupt() {
+    asm volatile ("cli");
 }
 
 void Architecture::setRet(u32 value) {

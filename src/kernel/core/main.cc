@@ -1,9 +1,11 @@
 #include <os.h>
 #include <arch/x86/architecture.h>
 #include <arch/x86/io.h>
+#include <arch/x86/keyboard.h>
 #include <core/system.h>
 #include <core/filesystem.h>
 #include <core/syscalls.h>
+#include <core/shell.h>
 
 Architecture arch;
 IO io;
@@ -70,15 +72,41 @@ extern "C" void kmain()
     
     serial_print("KMAIN: arch.init() completed successfully!\n");
     
+    // Initialize core subsystems that shell relies on
+    serial_print("KMAIN: Initializing filesystem\n");
+    fsm.init();
+    serial_print("KMAIN: Filesystem initialized\n");
+    
     // If we get here, write success message
     const char *msg3 = "ARCH INIT SUCCESS!";
     for (int i = 0; msg3[i] != '\0'; i++) {
         video_memory[160 + i] = (0x0A << 8) | msg3[i]; // Green text
     }
     
-    serial_print("KMAIN: Entering main loop\n");
+    serial_print("KMAIN: Initializing keyboard driver\n");
     
-    // Keep kernel alive
+    // Initialize keyboard for shell input
+    keyboard.init();
+    
+    // Set up IDT and PIC, then enable IRQs so keyboard uses IRQ1
+    serial_print("KMAIN: Initializing IDT and PIC\n");
+    init_idt();
+    init_pic();
+    arch.enable_interrupt();
+    
+    serial_print("KMAIN: Initializing shell\n");
+    
+    // Initialize and run shell
+    shell.init();
+    
+    serial_print("KMAIN: Starting interactive shell\n");
+    
+    // Start the shell (this will take over control)
+    shell.run();
+    
+    serial_print("KMAIN: Shell exited, entering halt loop\n");
+    
+    // If shell exits, keep kernel alive
     while(1) {
         asm volatile("hlt");
     }

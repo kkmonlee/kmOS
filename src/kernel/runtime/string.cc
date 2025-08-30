@@ -85,4 +85,28 @@ extern "C" {
 
         return result;
     }
+
+    char* strchr(const char* s, int c) {
+        const unsigned char ch = (unsigned char)c;
+        while (*s) {
+            if ((unsigned char)*s == ch) {
+                return (char*)s;
+            }
+            s++;
+        }
+        return (ch == 0) ? (char*)s : (char*)0;
+    }
+
+    char* strrchr(const char* s, int c) {
+        const unsigned char ch = (unsigned char)c;
+        const char* last = 0;
+        while (*s) {
+            if ((unsigned char)*s == ch) {
+                last = s;
+            }
+            s++;
+        }
+        if (ch == 0) return (char*)s;
+        return (char*)last;
+    }
 }

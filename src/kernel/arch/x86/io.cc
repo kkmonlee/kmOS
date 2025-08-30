@@ -46,30 +46,33 @@ IO::IO(u32 /*flag*/) {
 }
 
 void IO::outb(u32 ad, u8 v) {
-    (void)ad; (void)v;
+    asm volatile ("outb %0, %1" : : "a"(v), "Nd"((u16)ad));
 }
 
 void IO::outw(u32 ad, u16 v) {
-    (void)ad; (void)v;
+    asm volatile ("outw %0, %1" : : "a"(v), "Nd"((u16)ad));
 }
 
 void IO::outl(u32 ad, u32 v) {
-    (void)ad; (void)v;
+    asm volatile ("outl %0, %1" : : "a"(v), "Nd"((u16)ad));
 }
 
 u8 IO::inb(u32 ad) {
-    (void)ad;
-    return 0;
+    u8 ret;
+    asm volatile ("inb %1, %0" : "=a"(ret) : "Nd"((u16)ad));
+    return ret;
 }
 
 u16 IO::inw(u32 ad) {
-    (void)ad;
-    return 0;
+    u16 ret;
+    asm volatile ("inw %1, %0" : "=a"(ret) : "Nd"((u16)ad));
+    return ret;
 }
 
 u32 IO::inl(u32 ad) {
-    (void)ad;
-    return 0;
+    u32 ret;
+    asm volatile ("inl %1, %0" : "=a"(ret) : "Nd"((u16)ad));
+    return ret;
 }
 
 u32 IO::getX() {
@@ -236,6 +239,9 @@ void IO::print(const char *s, ...) {
             } else if (c == 's') {
                 char *str = (char *) va_arg(ap, int);
                 for(int k = 0; str && str[k]; k++) putc(str[k]);
+            } else if (c == 'c') {
+                int ch = va_arg(ap, int);
+                putc((char)ch);
             }
         } else {
             putc(c);
