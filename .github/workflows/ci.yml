@@ -114,6 +114,7 @@ jobs:
         
     - name: Run basic VMM tests
       run: |
+        cd integration_tests
         chmod +x test_vmm.sh
         ./test_vmm.sh
         
