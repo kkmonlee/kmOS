@@ -39,13 +39,13 @@ jobs:
         
     - name: Run comprehensive functionality tests
       run: |
-        chmod +x tests/test_kernel_functionality.sh
-        ./tests/test_kernel_functionality.sh src/sdk/bootdisk/kernel.elf
+        chmod +x integration_tests/test_kernel_functionality.sh
+        ./integration_tests/test_kernel_functionality.sh src/sdk/bootdisk/kernel.elf
         
     - name: Run extended QEMU integration tests
       run: |
-        chmod +x tests/qemu_integration_test.sh
-        QEMU_TIMEOUT=60 ./tests/qemu_integration_test.sh src/sdk/bootdisk/kernel.elf
+        chmod +x integration_tests/qemu_integration_test.sh
+        QEMU_TIMEOUT=60 ./integration_tests/qemu_integration_test.sh src/sdk/bootdisk/kernel.elf
         
     - name: Memory stress testing
       run: |
