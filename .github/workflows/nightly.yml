@@ -27,8 +27,27 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo nasm qemu-system-x86 grub-pc-bin xorriso mtools expect cppcheck valgrind gcc-i686-elf g++-i686-elf
-        
+        sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo nasm qemu-system-x86 grub-pc-bin xorriso mtools expect cppcheck valgrind
+        # Build i686-elf GCC Cross Compiler
+        mkdir -p $HOME/cross
+        cd $HOME/cross
+        wget https://ftp.gnu.org/gnu/binutils/binutils-2.40.tar.gz
+        tar -xf binutils-2.40.tar.gz
+        mkdir build-binutils
+        cd build-binutils
+        ../binutils-2.40/configure --target=i686-elf --prefix="$HOME/cross" --disable-nls
+        make -j$(nproc)
+        make install
+        cd $HOME/cross
+        wget https://ftp.gnu.org/gnu/gcc/gcc-13.2.0/gcc-13.2.0.tar.gz
+        tar -xf gcc-13.2.0.tar.gz
+        mkdir build-gcc
+        cd build-gcc
+        ../gcc-13.2.0/configure --target=i686-elf --prefix="$HOME/cross" --disable-nls --enable-languages=c,c++ --without-headers
+        make -j$(nproc) all-gcc
+        make install-gcc
+        echo "$HOME/cross/bin" >> $GITHUB_PATH
+
     - name: Setup cross-compiler
       run: echo "$HOME/.local/cross/bin" >> $GITHUB_PATH
       
