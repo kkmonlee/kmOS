@@ -1,4 +1,4 @@
-extern isr_default_int, do_syscalls, isr_schedule_int
+extern isr_default_int, do_syscalls, isr_schedule_int, keyboard_interrupt_handler
 
 %macro SAVE_REGS 0
     pushad                  ; save all general-purpose registers
@@ -73,3 +73,5 @@ _asm_schedule:
 
 INTERRUPT 1                ; define ISR for interrupt vector 1
 INTERRUPT 2                ; define ISR for interrupt vector 2
+
+; Keyboard ISR is implemented in separate file isr_kbd.asm

@@ -88,6 +88,12 @@ extern "C" void kmain()
     // Initialize keyboard for shell input
     keyboard.init();
     
+    // Set up IDT and PIC, then enable IRQs so keyboard uses IRQ1
+    serial_print("KMAIN: Initializing IDT and PIC\n");
+    init_idt();
+    init_pic();
+    arch.enable_interrupt();
+    
     serial_print("KMAIN: Initializing shell\n");
     
     // Initialize and run shell

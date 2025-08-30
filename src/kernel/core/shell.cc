@@ -391,9 +391,6 @@ void Shell::clear_screen() {
     for (int i = 0; i < 80 * 25; i++) {
         video_memory[i] = 0x0720; // Space character with light gray on black
     }
-    
-    // Reset cursor to top-left (this would need proper cursor management)
-    io.print("\033[H\033[J"); // ANSI escape codes (may not work in all contexts)
 }
 
 void Shell::add_to_history(const char* command) {

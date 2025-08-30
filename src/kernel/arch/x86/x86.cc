@@ -2,6 +2,8 @@
 #include <x86.h>
 #include <keyboard.h>
 
+extern "C" void _asm_int_33();
+
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
     int strcpy(char *dst, const char *src);
@@ -88,9 +90,7 @@ extern "C"
     // copy gdt to memory
     memcpy((char *)kgdtr.base, (char *)kgdt, kgdtr.limite);
 
-    // load gdtr - stubbed for compilation
-    // asm("lgdtl (kgdtr)");
-    (void)kgdtr;
+    asm volatile ("lgdt (%0)" :: "r"(&kgdtr));
   }
 
   // initializes an idt descriptor
@@ -115,7 +115,7 @@ extern "C"
     init_idt_desc(0x08, 0, INTGATE, &kidt[14]); // page fault
 
     // interrupts
-    init_idt_desc(0x08, 0, INTGATE, &kidt[33]);      // keyboard
+    init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);      // keyboard
     init_idt_desc(0x08, 0, TRAPGATE, &kidt[128]); // syscalls
 
     kidtr.limite = IDTSIZE * 8;
@@ -124,10 +124,7 @@ extern "C"
     // copy idt to memory
     memcpy((char *)kidtr.base, (char *)kidt, kidtr.limite);
 
-    // load idtr
-    // load idtr - stubbed for compilation
-    // asm("lidtl (kidtr)");
-    (void)kidtr;
+    asm volatile ("lidt (%0)" :: "r"(&kidtr));
   }
 
   // initializes the programmable interrupt controller
@@ -145,9 +142,9 @@ extern "C"
     io.outb(0x21, 0x01); // ICW4
     io.outb(0xA1, 0x01);
 
-    // mask interrupts
-    io.outb(0x21, 0x0);
-    io.outb(0xA1, 0x0);
+    // mask: enable only IRQ1 (keyboard) for now
+    io.outb(0x21, 0xFD); // 11111101b -> unmask bit 1 only
+    io.outb(0xA1, 0xFF); // mask all slave IRQs
   }
 
   // more functions (e.g., schedule, isr handlers, signal handling) remain as-is for brevity

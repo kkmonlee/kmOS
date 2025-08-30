@@ -11,7 +11,7 @@ static char scancode_to_char[128] = {
     'q', 'w',  'e', 'r', 't', 'y', 'u', 'i',    // 0x10-0x17
     'o', 'p',  '[', ']',  13,   0,  'a', 's',    // 0x18-0x1F (13=enter)
     'd', 'f',  'g', 'h', 'j', 'k', 'l', ';',    // 0x20-0x27
-    '\'','`',   0, '\\', 'z', 'x', 'c', 'v',    // 0x28-0x2F
+    '\'', '`',   0, '\\', 'z', 'x', 'c', 'v',    // 0x28-0x2F
     'b', 'n',  'm', ',', '.', '/',   0,  '*',    // 0x30-0x37
     0,   ' ',   0,   0,   0,   0,   0,   0,      // 0x38-0x3F (space=0x39)
     0,    0,    0,   0,   0,   0,   0,   0,      // 0x40-0x47
@@ -83,6 +83,10 @@ void Keyboard::write_data(u8 data) {
 }
 
 void Keyboard::handle_interrupt() {
+    // Read scancode only if output buffer set, otherwise spurious
+    if (!(read_status() & KEYBOARD_STATUS_OUT_BUFFER_FULL)) {
+        return;
+    }
     u8 scancode = read_data();
     bool key_released = (scancode & 0x80) != 0;
     u8 key = scancode & 0x7F;
@@ -179,29 +183,22 @@ int Keyboard::read_line(char* buffer, int max_len) {
     char c;
     
     while (pos < max_len - 1) {
-        // Pure polling: wait until controller output buffer has data
-        while (!(read_status() & KEYBOARD_STATUS_OUT_BUFFER_FULL)) {
-            asm volatile("pause");
-        }
-        handle_interrupt();
-        if (!char_available()) {
-            continue;
+        // IRQ-driven: wait until buffer has data (filled by ISR)
+        while (!char_available()) {
+            asm volatile("hlt");
         }
         c = get_char();
         
         if (c == '\n' || c == '\r') {
-            // Enter pressed
             buffer[pos] = '\0';
             io.print("\n");
             return pos;
         } else if (c == '\b' || c == 127) {
-            // Backspace
             if (pos > 0) {
                 pos--;
-                io.print("\b \b");  // Move back, print space, move back again
+                io.print("\b \b");
             }
         } else if (c >= 32 && c < 127) {
-            // Printable character
             buffer[pos] = c;
             io.print("%c", c);
             pos++;
