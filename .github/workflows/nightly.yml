@@ -55,6 +55,9 @@ jobs:
       run: |
         export PATH="$HOME/.local/cross/bin:$PATH"
         make clean && make all
+
+    - name: Ensure sys-include directory exists
+      run: mkdir -p /home/runner/cross/i686-elf/sys-include
         
     - name: Run comprehensive functionality tests
       run: |
