@@ -27,7 +27,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo nasm qemu-system-x86 grub-pc-bin xorriso mtools expect cppcheck valgrind
+        sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo nasm qemu-system-x86 grub-pc-bin xorriso mtools expect cppcheck valgrind gcc-i686-elf g++-i686-elf
         
     - name: Setup cross-compiler
       run: echo "$HOME/.local/cross/bin" >> $GITHUB_PATH
