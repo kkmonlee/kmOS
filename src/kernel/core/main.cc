@@ -72,6 +72,11 @@ extern "C" void kmain()
     
     serial_print("KMAIN: arch.init() completed successfully!\n");
     
+    // Initialize core subsystems that shell relies on
+    serial_print("KMAIN: Initializing filesystem\n");
+    fsm.init();
+    serial_print("KMAIN: Filesystem initialized\n");
+    
     // If we get here, write success message
     const char *msg3 = "ARCH INIT SUCCESS!";
     for (int i = 0; msg3[i] != '\0'; i++) {

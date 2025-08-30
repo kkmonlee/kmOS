@@ -1,5 +1,5 @@
 #include <os.h>
-#include <keyboard.h>
+#include <arch/x86/keyboard.h>
 #include <io.h>
 
 Keyboard keyboard;
@@ -179,11 +179,14 @@ int Keyboard::read_line(char* buffer, int max_len) {
     char c;
     
     while (pos < max_len - 1) {
-        while (!char_available()) {
-            // Wait for input (in real implementation, this would yield)
-            asm volatile("hlt");
+        // Pure polling: wait until controller output buffer has data
+        while (!(read_status() & KEYBOARD_STATUS_OUT_BUFFER_FULL)) {
+            asm volatile("pause");
         }
-        
+        handle_interrupt();
+        if (!char_available()) {
+            continue;
+        }
         c = get_char();
         
         if (c == '\n' || c == '\r') {

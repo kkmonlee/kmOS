@@ -12,6 +12,7 @@ extern "C" {
     int strncpy(char *dst, const char *src, int n);
     char* strcat(char *dst, const char *src);
     char* strchr(const char *s, int c);
+    char* strrchr(const char *s, int c);
     void memset(void *ptr, int value, int num);
     void memcpy(void *dst, const void *src, int n);
 }
@@ -112,8 +113,7 @@ void Shell::print_banner() {
     clear_screen();
     io.print("╔════════════════════════════════════════════════════════════════════════════════╗\n");
     io.print("║                                    kmOS Shell                                  ║\n");
-    io.print("║                              Welcome to kmOS v1.0                            ║\n");
-    io.print("║                         Advanced Memory Management Kernel                     ║\n");
+    io.print("║                              Welcome to kmOS v1.0                              ║\n");
     io.print("╚════════════════════════════════════════════════════════════════════════════════╝\n");
     io.print("\n");
     io.print("Type 'help' for a list of available commands.\n\n");
@@ -340,6 +340,7 @@ int Shell::cmd_uptime(int argc, char** argv) {
 int Shell::cmd_uname(int argc, char** argv) {
     (void)argc; (void)argv;
     io.print("kmOS 1.0 x86 kernel\n");
+    io.print("Created by: @kkmonlee\n");
     return 0;
 }
 
