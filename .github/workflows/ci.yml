@@ -349,14 +349,14 @@ jobs:
         fi
         
         # Check if build instructions exist
-        if grep -q -i "build\|compile" README.md CLAUDE.md 2>/dev/null; then
+        if grep -q -i "build\|compile" README.md 2>/dev/null; then
           echo "✓ Build instructions found"
         else
           echo "✗ Build instructions not found"
         fi
         
         # Check for basic project info
-        if grep -q -i "kmos\|operating.*system" README.md CLAUDE.md 2>/dev/null; then
+        if grep -q -i "kmos\|operating.*system" README.md 2>/dev/null; then
           echo "✓ Project description found"
         else
           echo "? Project description unclear"
