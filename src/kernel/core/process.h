@@ -11,6 +11,9 @@
 // State definitions for the process
 #define ZOMBIE PROC_STATE_ZOMBIE
 #define CHILD PROC_STATE_RUN
+#define RUNNING 1
+#define SLEEPING 2
+#define READY 4
 
 // Structure to represent an open file in a process
 struct openfile
@@ -68,6 +71,9 @@ public:
   // Getters/Setters for the current directory
   File *getCurrentDir();
   void setCurrentDir(File *f);
+  
+  u64 get_total_runtime();
+  u32 get_time_slice_count();
 
 protected:
   static u32 proc_pid; // Static PID tracker
@@ -81,6 +87,10 @@ protected:
   process_st info;                  // Architecture-specific process info
   File *cdir;                       // Current directory
   Buffer *ipc;                      // Inter-process communication buffer
+  
+  u64 total_runtime;
+  u64 last_scheduled;
+  u32 time_slice;
 
   static char *default_tty; // Default TTY device
 };

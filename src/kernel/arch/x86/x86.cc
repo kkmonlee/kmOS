@@ -2,6 +2,7 @@
 #include <x86.h>
 #include <keyboard.h>
 
+extern "C" void _asm_int_32();
 extern "C" void _asm_int_33();
 
 extern "C" {
@@ -115,7 +116,8 @@ extern "C"
     init_idt_desc(0x08, 0, INTGATE, &kidt[14]); // page fault
 
     // interrupts
-    init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);      // keyboard
+    init_idt_desc(0x08, (u32)_asm_int_32, INTGATE, &kidt[32]);      // timer IRQ0
+    init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);      // keyboard IRQ1
     init_idt_desc(0x08, 0, TRAPGATE, &kidt[128]); // syscalls
 
     kidtr.limite = IDTSIZE * 8;
@@ -142,8 +144,8 @@ extern "C"
     io.outb(0x21, 0x01); // ICW4
     io.outb(0xA1, 0x01);
 
-    // mask: enable only IRQ1 (keyboard) for now
-    io.outb(0x21, 0xFD); // 11111101b -> unmask bit 1 only
+    // unmask IRQ0 (timer) and IRQ1 (keyboard)
+    io.outb(0x21, 0xFC); // 11111100b -> unmask bits 0 and 1
     io.outb(0xA1, 0xFF); // mask all slave IRQs
   }
 

@@ -28,4 +28,6 @@ extern "C" {
     
     void isr_schedule_int() {
     }
+    
+    void isr_timer_int();
 }

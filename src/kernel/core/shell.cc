@@ -2,6 +2,7 @@
 #include <shell.h>
 #include <filesystem.h>
 #include <arch/x86/keyboard.h>
+#include <arch/x86/pit.h>
 #include <runtime/alloc.h>
 
 extern "C" {
@@ -15,6 +16,17 @@ extern "C" {
     char* strrchr(const char *s, int c);
     void memset(void *ptr, int value, int num);
     void memcpy(void *dst, const void *src, int n);
+}
+
+extern IO io;
+extern Keyboard keyboard;
+
+// Serial output helper
+static void serial_print_shell(const char* str) {
+    while (*str) {
+        asm volatile("outb %0, %1" : : "a"(*str), "Nd"((unsigned short)0x3F8));
+        str++;
+    }
 }
 
 Shell shell;
@@ -41,24 +53,32 @@ static struct shell_command builtin_commands[] = {
 };
 
 void Shell::init() {
+    serial_print_shell("[SHELL] Entering init()\n");
     io.print("[SHELL] Initializing shell\n");
     
+    serial_print_shell("[SHELL] About to strcpy\n");
     // Initialize state
     strcpy(state.current_directory, "/");
+    serial_print_shell("[SHELL] strcpy done\n");
     memset(state.command_buffer, 0, MAX_COMMAND_LENGTH);
+    serial_print_shell("[SHELL] memset done\n");
     state.history_count = 0;
     state.history_index = 0;
     state.running = false;
     state.exit_code = 0;
     
+    serial_print_shell("[SHELL] About to init history\n");
     // Initialize command history
     for (int i = 0; i < MAX_HISTORY; i++) {
         state.command_history[i] = nullptr;
     }
     
+    serial_print_shell("[SHELL] About to init_commands\n");
     init_commands();
+    serial_print_shell("[SHELL] init_commands done\n");
     
     io.print("[SHELL] Shell initialized\n");
+    serial_print_shell("[SHELL] Exiting init()\n");
 }
 
 void Shell::init_commands() {
@@ -86,11 +106,19 @@ void Shell::init_commands() {
 }
 
 void Shell::run() {
+    serial_print_shell("[SHELL] run() called\n");
+    io.print("[SHELL] About to print banner\n");
+    serial_print_shell("[SHELL] io.print returned from banner message\n");
     print_banner();
+    serial_print_shell("[SHELL] print_banner() returned\n");
+    io.print("[SHELL] Banner printed, entering main loop\n");
     state.running = true;
     
     while (state.running) {
+        serial_print_shell("[SHELL] Loop iteration start\n");
+        io.print("[SHELL] About to print prompt\n");
         print_prompt();
+        io.print("[SHELL] Prompt printed, waiting for input\n");
         
         // Read command line
         int len = keyboard.read_line(state.command_buffer, MAX_COMMAND_LENGTH);
@@ -333,7 +361,21 @@ int Shell::cmd_swap(int argc, char** argv) {
 
 int Shell::cmd_uptime(int argc, char** argv) {
     (void)argc; (void)argv;
-    io.print("System uptime: 0 days, 0 hours, 0 minutes\n");
+    
+    u64 uptime_ms = pit.get_uptime_ms();
+    u64 seconds = uptime_ms / 1000;
+    u64 minutes = seconds / 60;
+    u64 hours = minutes / 60;
+    u64 days = hours / 24;
+    
+    seconds %= 60;
+    minutes %= 60;
+    hours %= 24;
+    
+    io.print("System uptime: %d days, %d hours, %d minutes, %d seconds\n",
+             (u32)days, (u32)hours, (u32)minutes, (u32)seconds);
+    io.print("Timer ticks: %d\n", (u32)pit.get_ticks());
+    
     return 0;
 }
 

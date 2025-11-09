@@ -1,16 +1,24 @@
 #include <os.h>
 #include <process.h>
-#include <architecture.h>
+#include <elf_loader.h>
+#include <arch/x86/vmm.h>
+#include <runtime/alloc.h>
+#include <arch/x86/architecture.h>
 #include <filesystem.h>
-#include <archprocess.h>
-#include <api/dev/proc.h>
-#include <signal.h>
-#include <config.h>
-#include <cow.h>
 
 extern "C" {
-    void *memcpy(void *dest, const void *src, int n);
-    char *strncpy(char *destString, const char *sourceString, int maxLength);
+  int strlen(const char *s);
+  void *memcpy(void *dest, const void *src, int n);
+  void *memset(void *s, int c, int n);
+  int strcmp(const char *s1, const char *s2);
+  int strncpy(char *dst, const char *src, int n);
+  u64 get_system_ticks();
+}
+
+struct page_directory;
+extern "C" {
+  int cow_fork_mm(page_directory *child_pd, page_directory *parent_pd);
+  void cow_cleanup_process(struct page_directory *pd);
 }
 
 extern Architecture arch;
@@ -22,36 +30,36 @@ u32 Process::proc_pid = 0;
 /* Destructor */
 Process::~Process()
 {
-  extern void cow_cleanup_process(struct page_directory *pd);
-  
   if (info.pd) {
     cow_cleanup_process(info.pd);
     vmm.destroy_page_directory(info.pd);
   }
   
   delete ipc;
-  arch.change_process_father(this, pparent); // Change parent of child processes
+  arch.change_process_father(this, pparent);
 }
 
 Process::Process(char *n) : File(n, TYPE_PROCESS)
 {
-  fsm.addFile("/proc/", this);
-  pparent = arch.pcurrent;
   pid = proc_pid++;
-  cdir = (pparent != NULL) ? pparent->getCurrentDir() : fsm.getRoot();
-  arch.addProcess(this);
-  info.vinfo = (void *)this;
+  state = SLEEPING;
+  pparent = 0;
+  pnext = 0;
+  cdir = 0;
+  time_slice = 0;
+  total_runtime = 0;
+  last_scheduled = 0;
 
-  // Initialize open files
   for (int i = 0; i < CONFIG_MAX_FILE; i++)
   {
     openfp[i].fp = NULL;
+    openfp[i].mode = 0;
+    openfp[i].ptr = 0;
   }
 
-  ipc = new Buffer(); // IPC buffer
+  ipc = new Buffer();
 }
 
-/* File operations */
 u32 Process::open(u32 flag)
 {
   return RETURN_OK;
@@ -205,14 +213,49 @@ void Process::exit()
 
 Process *Process::schedule()
 {
+  if (pnext == NULL) {
+    return this;
+  }
+  
   Process *n = this;
-  do
-  {
-    n = (n->getPNext() != NULL) ? n->getPNext() : arch.plist;
-  } while (n->getState() == ZOMBIE);
-
-  arch.pcurrent = n;
+  u32 attempts = 0;
+  const u32 max_attempts = 100;
+  
+  do {
+    n = (n->pnext != NULL) ? n->pnext : arch.plist;
+    attempts++;
+    
+    if (attempts > max_attempts) {
+      return this;
+    }
+  } while (n != NULL && (n->state == ZOMBIE || n->state == SLEEPING));
+  
+  if (n == NULL || n == this) {
+    return this;
+  }
+  
+  u64 current_ticks = get_system_ticks();
+  
+  if (this->state == RUNNING) {
+    this->total_runtime += (current_ticks - this->last_scheduled);
+    this->state = READY;
+  }
+  
+  n->state = RUNNING;
+  n->last_scheduled = current_ticks;
+  n->time_slice++;
+  
   return n;
+}
+
+u64 Process::get_total_runtime()
+{
+  return total_runtime;
+}
+
+u32 Process::get_time_slice_count()
+{
+  return time_slice;
 }
 
 process_st *Process::getPInfo()

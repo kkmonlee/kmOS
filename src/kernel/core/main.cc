@@ -2,6 +2,7 @@
 #include <arch/x86/architecture.h>
 #include <arch/x86/io.h>
 #include <arch/x86/keyboard.h>
+#include <arch/x86/pit.h>
 #include <core/system.h>
 #include <core/filesystem.h>
 #include <core/syscalls.h>
@@ -92,6 +93,11 @@ extern "C" void kmain()
     serial_print("KMAIN: Initializing IDT and PIC\n");
     init_idt();
     init_pic();
+    
+    serial_print("KMAIN: Initializing PIT timer\n");
+    pit.init(100);
+    
+    serial_print("KMAIN: Enabling interrupts\n");
     arch.enable_interrupt();
     
     serial_print("KMAIN: Initializing shell\n");

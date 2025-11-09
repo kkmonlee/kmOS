@@ -8,6 +8,7 @@ RUNTIME_OBJS := \
 	runtime/slab.o \
 	runtime/slob.o \
 	runtime/slub.o \
+	runtime/divdi3.o \
 	runtime/stack.o \
 	runtime/unified_alloc.o
 

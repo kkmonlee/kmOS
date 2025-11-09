@@ -1,4 +1,5 @@
 extern isr_default_int, do_syscalls, isr_schedule_int, keyboard_interrupt_handler
+extern isr_timer_int
 
 %macro SAVE_REGS 0
     pushad                  ; save all general-purpose registers
@@ -33,18 +34,32 @@ _asm_int_%1:
     iret
 %endmacro
 
-extern isr_GP_exc, isr_PF_exc 
-global _asm_syscalls, _asm_exc_GP, _asm_exc_PF
-
-_asm_syscalls:
+; Timer interrupt (IRQ0 = vector 32)
+global _asm_int_32
+_asm_int_32:
     SAVE_REGS
-    push eax                ; pass syscall number
-    call do_syscalls
-    pop eax
-    cli                     ; clear interrupts
-    sti                     ; enable interrupts
+    call isr_timer_int
+    mov al, 0x20
+    out 0x20, al            ; send EOI to PIC
     RESTORE_REGS
     iret
+
+; Keyboard interrupt (IRQ1 = vector 33) - defined in isr_kbd.asm
+
+extern isr_GP_exc, isr_PF_exc 
+global _asm_exc_GP, _asm_exc_PF
+
+; Syscall handler - disabled until do_syscalls is implemented
+; global _asm_syscalls
+; _asm_syscalls:
+;     SAVE_REGS
+;     push eax                ; pass syscall number
+;     call do_syscalls
+;     pop eax
+;     cli                     ; clear interrupts
+;     sti                     ; enable interrupts
+;     RESTORE_REGS
+;     iret
 
 _asm_exc_GP:
     SAVE_REGS
