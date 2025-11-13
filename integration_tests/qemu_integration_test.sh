@@ -24,19 +24,19 @@ BOOT_TIMEOUT=15
 MEMORY_TEST_SIZE="64M"
 
 log() {
-    echo -e "${BLUE}[$(date +'%H:%M:%S')] $1${NC}"
+    echo -e "${BLUE}[$(date +'%H:%M:%S')] $1${NC}" >&2
 }
 
 error() {
-    echo -e "${RED}[ERROR] $1${NC}"
+    echo -e "${RED}[ERROR] $1${NC}" >&2
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}"
+    echo -e "${GREEN}[SUCCESS] $1${NC}" >&2
 }
 
 warning() {
-    echo -e "${YELLOW}[WARNING] $1${NC}"
+    echo -e "${YELLOW}[WARNING] $1${NC}" >&2
 }
 
 # Check dependencies
