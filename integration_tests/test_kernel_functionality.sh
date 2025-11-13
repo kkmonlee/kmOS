@@ -28,12 +28,12 @@ log() {
 
 test_passed() {
     echo -e "${GREEN}✓ $1${NC}"
-    ((TESTS_PASSED++))
+    ((++TESTS_PASSED))
 }
 
 test_failed() {
     echo -e "${RED}✗ $1${NC}"
-    ((TESTS_FAILED++))
+    ((++TESTS_FAILED))
 }
 
 test_warning() {
@@ -44,7 +44,7 @@ run_test() {
     local test_name="$1"
     local test_func="$2"
     
-    ((TESTS_TOTAL++))
+    ((++TESTS_TOTAL))
     log "Running test: $test_name"
     
     if $test_func; then
@@ -120,7 +120,7 @@ test_memory_management() {
     local found_symbols=0
     for symbol in "${memory_symbols[@]}"; do
         if echo "$symbols_output" | grep -q "$symbol"; then
-            ((found_symbols++))
+            ((++found_symbols))
         fi
     done
     
@@ -150,7 +150,7 @@ test_cow_symbols() {
     local found_symbols=0
     for symbol in "${cow_symbols[@]}"; do
         if echo "$symbols_output" | grep -q "$symbol"; then
-            ((found_symbols++))
+            ((++found_symbols))
         fi
     done
     
@@ -178,7 +178,7 @@ test_process_symbols() {
     local found_symbols=0
     for symbol in "${process_symbols[@]}"; do
         if echo "$symbols_output" | grep -q "$symbol"; then
-            ((found_symbols++))
+            ((++found_symbols))
         fi
     done
     
@@ -246,9 +246,9 @@ test_kernel_sections() {
     fi
     
     # Check text section size
-    local text_size=$(echo "$sections" | grep "\.text" | awk '{print "0x" $3}')
-    if [ -n "$text_size" ]; then
-        local text_size_dec=$((text_size))
+    local text_size_hex=$(echo "$sections" | awk '$2 == ".text" {print "0x" $3; exit}')
+    if [ -n "$text_size_hex" ]; then
+        local text_size_dec=$((text_size_hex))
         if [ $text_size_dec -lt 1024 ]; then
             echo "Text section too small: $text_size_dec bytes"
             return 1
@@ -316,7 +316,7 @@ test_code_quality() {
         local disasm=$(objdump -d "$KERNEL_PATH" 2>/dev/null || true)
         if echo "$disasm" | grep -q "strcpy\|strcat\|sprintf"; then
             test_warning "Potentially unsafe string functions found"
-            ((warnings++))
+            ((++warnings))
         fi
     fi
     
@@ -326,7 +326,7 @@ test_code_quality() {
         echo "Stack protection symbols found"
     else
         test_warning "No stack protection symbols found"
-        ((warnings++))
+        ((++warnings))
     fi
     
     if [ $warnings -eq 0 ]; then
