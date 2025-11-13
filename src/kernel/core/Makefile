@@ -3,6 +3,8 @@ CORE_OBJS := \
 	core/elf_loader.o \
 	core/file.o \
 	core/filesystem.o \
+	core/block_device.o \
+	core/ext2.o \
 	core/api_posix.o \
 	core/process.o \
 	core/syscalls.o \

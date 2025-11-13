@@ -148,6 +148,4 @@ extern "C"
     io.outb(0x21, 0xFC); // 11111100b -> unmask bits 0 and 1
     io.outb(0xA1, 0xFF); // mask all slave IRQs
   }
-
-  // more functions (e.g., schedule, isr handlers, signal handling) remain as-is for brevity
 }

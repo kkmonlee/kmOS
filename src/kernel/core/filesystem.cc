@@ -1,17 +1,31 @@
 #include <os.h>
 #include <filesystem.h>
+#include <filesystem_driver.h>
+#include <core/block_device.h>
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
     int strcmp(const char *s1, const char *s2);
     int strcpy(char *dst, const char *src);
+  int strlen(const char *s);
 }
 
 #include <arch/x86/architecture.h>
 
 // class to manage file hierarchy
 
-Filesystem::Filesystem() {}
+Filesystem::Filesystem()
+  : driver_count(0), mount_count(0), root(nullptr), dev(nullptr), var(nullptr) {
+  for (u32 i = 0; i < kMaxDrivers; ++i) {
+    drivers[i] = nullptr;
+  }
+  for (u32 i = 0; i < kMaxMounts; ++i) {
+    mounts[i].path[0] = '\0';
+    mounts[i].driver = nullptr;
+    mounts[i].device = nullptr;
+    mounts[i].mount_point = nullptr;
+  }
+}
 
 void Filesystem::init()
 {
@@ -196,4 +210,65 @@ u32 Filesystem::addFile(const char *dir, File *fp)
     return ERROR_PARAM;
 
   return parent->addChild(fp);
+}
+
+bool Filesystem::register_driver(FilesystemDriver *driver)
+{
+  if (!driver || driver_count >= kMaxDrivers)
+    return false;
+
+  drivers[driver_count++] = driver;
+  return true;
+}
+
+FilesystemDriver *Filesystem::find_driver(const char *name)
+{
+  if (!name)
+    return nullptr;
+
+  for (u32 i = 0; i < driver_count; ++i)
+  {
+    if (drivers[i] && strcmp(drivers[i]->name(), name) == 0)
+      return drivers[i];
+  }
+  return nullptr;
+}
+
+bool Filesystem::mount(BlockDevice *device, const char *mount_path, const char *fs_name)
+{
+  if (!device || !mount_path || !fs_name)
+    return false;
+
+  if (mount_count >= kMaxMounts)
+    return false;
+
+  FilesystemDriver *driver = find_driver(fs_name);
+  if (!driver)
+    return false;
+
+  File *mp = path(mount_path);
+  if (!mp)
+    return false;
+
+  if (mp->getType() != TYPE_DIRECTORY)
+    return false;
+
+  File *final_mp = driver->mount(mp, device);
+  if (!final_mp)
+    return false;
+
+  MountInfo &info = mounts[mount_count++];
+  u32 len = strlen(mount_path);
+  if (len >= sizeof(info.path))
+    len = sizeof(info.path) - 1;
+  memcpy(info.path, mount_path, len);
+  info.path[len] = '\0';
+  info.driver = driver;
+  info.device = device;
+  info.mount_point = final_mp;
+
+  if (strcmp(mount_path, "/") == 0) {
+    root = final_mp;
+  }
+  return true;
 }

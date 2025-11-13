@@ -3,10 +3,12 @@
 #include <arch/x86/io.h>
 #include <arch/x86/keyboard.h>
 #include <arch/x86/pit.h>
+#include <arch/x86/ata.h>
 #include <core/system.h>
 #include <core/filesystem.h>
 #include <core/syscalls.h>
 #include <core/shell.h>
+#include <core/ext2.h>
 
 Architecture arch;
 IO io;
@@ -77,6 +79,31 @@ extern "C" void kmain()
     serial_print("KMAIN: Initializing filesystem\n");
     fsm.init();
     serial_print("KMAIN: Filesystem initialized\n");
+
+    fsm.register_driver(&ext2_driver);
+
+    serial_print("KMAIN: Initializing ATA devices\n");
+    ata_init();
+
+    ATADevice* disk = ata_primary_master();
+    if (disk && disk->identify().present) {
+        serial_print("KMAIN: Primary ATA device detected\n");
+
+        if (!fsm.path("/mnt/disk")) {
+            File* mnt = fsm.path("/mnt");
+            if (mnt) {
+                mnt->createChild("disk", TYPE_DIRECTORY);
+            }
+        }
+
+        if (fsm.mount(disk, "/mnt/disk", "ext2")) {
+            serial_print("KMAIN: ext2 filesystem mounted at /mnt/disk\n");
+        } else {
+            serial_print("KMAIN: Failed to mount ext2 filesystem\n");
+        }
+    } else {
+        serial_print("KMAIN: No ATA disk detected\n");
+    }
     
     // If we get here, write success message
     const char *msg3 = "ARCH INIT SUCCESS!";
@@ -102,12 +129,10 @@ extern "C" void kmain()
     
     serial_print("KMAIN: Initializing shell\n");
     
-    // Initialize and run shell
     shell.init();
     
     serial_print("KMAIN: Starting interactive shell\n");
     
-    // Start the shell (this will take over control)
     shell.run();
     
     serial_print("KMAIN: Shell exited, entering halt loop\n");

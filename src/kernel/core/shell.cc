@@ -240,23 +240,34 @@ int Shell::cmd_clear(int argc, char** argv) {
 }
 
 int Shell::cmd_ls(int argc, char** argv) {
-    (void)argc; (void)argv;
-    
     const char* path = (argc > 1) ? argv[1] : state.current_directory;
     File* dir = fsm.path(path);
-    
+
     if (!dir) {
         io.print("ls: cannot access '%s': No such file or directory\n", path);
         return 1;
     }
-    
+
+    if (dir->getType() != TYPE_DIRECTORY) {
+        io.print("%s\n", dir->getName());
+        return 0;
+    }
+
+    dir->scan();
+
     io.print("Contents of %s:\n", path);
-    io.print("  .   (current directory)\n");
-    io.print("  ..  (parent directory)\n");
-    
-    // TODO: Implement actual directory listing when filesystem is complete
-    io.print("  (filesystem directory listing not yet implemented)\n");
-    
+
+    for (File* child = dir->getChild(); child != nullptr; child = child->getNext()) {
+        char marker = ' ';
+        switch (child->getType()) {
+            case TYPE_DIRECTORY: marker = '/'; break;
+            case TYPE_LINK: marker = '@'; break;
+            case TYPE_DEVICE: marker = '#'; break;
+            default: marker = ' ';
+        }
+        io.print("  %s%c\n", child->getName(), marker);
+    }
+
     return 0;
 }
 
@@ -309,23 +320,58 @@ int Shell::cmd_cat(int argc, char** argv) {
         io.print("Usage: cat <filename>\n");
         return 1;
     }
-    
+
     char* full_path = get_full_path(argv[1]);
     if (!full_path) {
         io.print("cat: memory allocation failed\n");
         return 1;
     }
-    
+
     File* file = fsm.path(full_path);
     kfree(full_path);
-    
+
     if (!file) {
         io.print("cat: %s: No such file or directory\n", argv[1]);
         return 1;
     }
-    
-    // TODO: Implement actual file reading when filesystem is complete
-    io.print("(file content display not yet implemented)\n");
+
+    if (file->getType() == TYPE_DIRECTORY) {
+        io.print("cat: %s: Is a directory\n", argv[1]);
+        return 1;
+    }
+
+    u32 file_size = file->getSize();
+    if (file_size == 0) {
+        io.print("\n");
+        return 0;
+    }
+
+    const u32 chunk = 512;
+    u8* buffer = (u8*)kmalloc(chunk);
+    if (!buffer) {
+        io.print("cat: unable to allocate buffer\n");
+        return 1;
+    }
+
+    u32 offset = 0;
+    while (offset < file_size) {
+        u32 to_read = file_size - offset;
+        if (to_read > chunk)
+            to_read = chunk;
+
+        u32 read = file->read(offset, buffer, to_read);
+        if (read == 0)
+            break;
+
+        for (u32 i = 0; i < read; ++i) {
+            io.putc((char)buffer[i]);
+        }
+
+        offset += read;
+    }
+
+    kfree(buffer);
+    io.print("\n");
     return 0;
 }
 
