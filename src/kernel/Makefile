@@ -64,6 +64,9 @@ geniso:
 %.o: %.asm
 	$(ASM) $(ASMFLAG) $< -o $@
 
+arch/$(ARCH)/x86int_asm.o: arch/$(ARCH)/x86int.asm
+	$(ASM) $(ASMFLAG) $< -o $@
+
 
 clean:
 	rm -f $(OBJS)  $(KERNEL) dasm.txt
