@@ -1,8 +1,9 @@
+[![Kernel / QEMU integration](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml/badge.svg)](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml)
+
+# kmOS
 <p align="center">
   <img src="https://raw.githubusercontent.com/kkmonlee/kmOS/master/media/kmos.png">
 </p>
-
-# kmOS
 
 kmOS is a general-purpose UNIX-like monolithic operating system written from scratch. Its primary aim is to have interoperability with existing software and architectures; be maintainable, modular and quick.
 
