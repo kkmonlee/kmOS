@@ -1,4 +1,4 @@
-[![Kernel / QEMU integration](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml/badge.svg)](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml)
+[![kmOS kernel & QEMU integration](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml/badge.svg)](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml)
 
 # kmOS
 <p align="center">
