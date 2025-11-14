@@ -1,4 +1,8 @@
-[![kmOS kernel & QEMU integration](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml/badge.svg)](https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml">
+    <img src="https://github.com/kkmonlee/kmOS/actions/workflows/ci.yml/badge.svg" alt="kmOS kernel & QEMU integration">
+  </a>
+</p>
 
 # kmOS
 <p align="center">
