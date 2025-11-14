@@ -16,8 +16,6 @@ On the backend, since kmOS is monolithic, it contains a very quick driver model 
 
 kmOS is event-driven, preemptible, SMP-ready, and network ready.
 
-## Current Implementation Status
-
 **Completed Features:**
 
 - **Memory Management**: Full demand paging system with virtual memory
