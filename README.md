@@ -4,8 +4,6 @@
   </a>
 </p>
 
-# kmOS
-
 <p align="center">
   <img style="width: 500px" src="https://raw.githubusercontent.com/kkmonlee/kmOS/master/media/kmos.png">
 </p>
