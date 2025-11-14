@@ -1,4 +1,4 @@
-name: kmOS CI/CD
+name: kmOS kernel & QEMU integration
 
 on:
   push:
