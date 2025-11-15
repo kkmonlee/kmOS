@@ -35,9 +35,8 @@ static void strreplace(char *s, char a, char to)
   }
 }
 
-u32 File::inode_system = 0; // Starting inode number
+u32 File::inode_system = 0;
 
-/* Constructor */
 File::File(const char *n, u8 t)
 {
   name = (char *)kmalloc(strlen(n) + 1);
@@ -45,7 +44,7 @@ File::File(const char *n, u8 t)
   memcpy(name, n, strlen(n));
 
   checkName();
-  master = arch.pcurrent; // The current process is the master upon creation
+  master = arch.pcurrent;
   inode = inode_system++;
   size = 0;
   type = t;
@@ -53,12 +52,10 @@ File::File(const char *n, u8 t)
   map_memory = NULL;
 }
 
-/* Destructor */
 File::~File()
 {
   kfree(name);
 
-  // Update sibling relationships
   if (prec == NULL)
   {
     parent->setChild(next);
@@ -75,7 +72,6 @@ File::~File()
     next->setPrec(prec);
   }
 
-  // Delete child files/directories
   File *n = child;
   while (n != NULL)
   {
@@ -171,7 +167,6 @@ File *File::find(char *n)
   return NULL;
 }
 
-// Placeholder implementations for file operations
 u32 File::open(u32 /*flag*/) { return NOT_DEFINED; }
 u32 File::close() { return NOT_DEFINED; }
 u32 File::read(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
@@ -189,28 +184,25 @@ u32 File::remove()
 stat_fs File::stat()
 {
   stat_fs st;
-  st.st_dev = 0;        // Device ID (0 for virtual filesystem)
-  st.st_ino = 0;        // Inode number (not implemented yet)
-  st.st_mode = type;    // File type from our TYPE_* constants
-  st.st_nlink = 1;      // Number of hard links
-  st.st_uid = 0;        // User ID
-  st.st_gid = 0;        // Group ID
-  st.st_rdev = 0;       // Device ID (if special file)
-  st.st_size = getSize(); // File size in bytes
-  st.st_blksize = 4096; // Block size for filesystem I/O
-  st.st_blocks = (getSize() + 4095) / 4096; // Number of 512B blocks allocated
-  st.st_atime = 0;      // Time of last access (not tracked yet)
-  st.st_mtime = 0;      // Time of last modification (not tracked yet)
-  st.st_ctime = 0;      // Time of last status change (not tracked yet)
+  st.st_dev = 0;
+  st.st_ino = 0;
+  st.st_mode = type;
+  st.st_nlink = 1;
+  st.st_uid = 0;
+  st.st_gid = 0;
+  st.st_rdev = 0;
+  st.st_size = getSize();
+  st.st_blksize = 4096;
+  st.st_blocks = (getSize() + 4095) / 4096;
+  st.st_atime = 0;
+  st.st_mtime = 0;
+  st.st_ctime = 0;
   return st;
 }
 
 void File::scan() {
 }
 
-/**
- * Memory maps the file if possible.
- */
 u32 File::mmap(u32 sizee, u32 /*flags*/, u32 /*offset*/, u32 /*prot*/)
 {
   if (map_memory != NULL)

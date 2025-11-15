@@ -4,39 +4,39 @@
 #include <runtime/types.h>
 #include <process.h>
 
-// elf header structure
+
 typedef struct
 {
-  unsigned char e_ident[16]; // elf identification
-  u16 e_type;                // object file type
-  u16 e_machine;             // architecture
-  u32 e_version;             // version
-  u32 e_entry;               // entry point address
-  u32 e_phoff;               // program header offset
-  u32 e_shoff;               // section header offset
-  u32 e_flags;               // processor-specific flags
-  u16 e_ehsize;              // elf header size
-  u16 e_phentsize;           // program header entry size
-  u16 e_phnum;               // number of entries in program header
-  u16 e_shentsize;           // section header entry size
-  u16 e_shnum;               // number of entries in section header
-  u16 e_shstrndx;            // section name string table index
+  unsigned char e_ident[16];
+  u16 e_type;
+  u16 e_machine;
+  u32 e_version;
+  u32 e_entry;
+  u32 e_phoff;
+  u32 e_shoff;
+  u32 e_flags;
+  u16 e_ehsize;
+  u16 e_phentsize;
+  u16 e_phnum;
+  u16 e_shentsize;
+  u16 e_shnum;
+  u16 e_shstrndx;
 } Elf32_Ehdr;
 
-// program header structure
+
 typedef struct
 {
-  u32 p_type;   // segment type
-  u32 p_offset; // segment file offset
-  u32 p_vaddr;  // virtual address
-  u32 p_paddr;  // physical address
-  u32 p_filesz; // size in file
-  u32 p_memsz;  // size in memory
-  u32 p_flags;  // segment flags
-  u32 p_align;  // alignment
+  u32 p_type;
+  u32 p_offset;
+  u32 p_vaddr;
+  u32 p_paddr;
+  u32 p_filesz;
+  u32 p_memsz;
+  u32 p_flags;
+  u32 p_align;
 } Elf32_Phdr;
 
-// section header structure
+
 typedef struct
 {
   u32 name;
@@ -56,4 +56,4 @@ u32 load_elf(char *file, process_st *proc);
 int execv(char *file, int argc, char **argv);
 void execv_module(u32 entry, int argc, char **argv);
 
-#endif // ELF_H
+#endif

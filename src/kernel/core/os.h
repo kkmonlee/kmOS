@@ -28,4 +28,4 @@ struct module_class
 #define asm __asm__
 #define asmv __asm__ __volatile__
 
-#endif // OS_H
+#endif

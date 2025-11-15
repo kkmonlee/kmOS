@@ -1,11 +1,8 @@
 #!/bin/bash
 
-# QEMU-based integration testing for kmOS
-# Tests kernel boot, memory management, and basic functionality in emulated environment
 
 set -e
 
-# Handle Ctrl+C gracefully
 trap 'echo ""; log "Integration tests interrupted by user"; exit 130' INT TERM
 
 SCRIPT_DIR="$(dirname "$0")"
@@ -13,18 +10,16 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 KERNEL_PATH="${1:-$PROJECT_ROOT/src/kernel/kernel.elf}"
 TEST_RESULTS="$SCRIPT_DIR/results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BOOT_METHOD="iso"   # iso (bootable ISO) or kernel (direct -kernel)
+BOOT_METHOD="iso"
 BOOT_IMAGE=""
 TIMEOUT_CMD=""
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Test configuration
 QEMU_TIMEOUT=10
 BOOT_TIMEOUT=8
 MEMORY_TEST_SIZE="64M"
@@ -45,7 +40,6 @@ warning() {
     echo -e "${YELLOW}[WARNING] $1${NC}" >&2
 }
 
-# Check dependencies
 check_dependencies() {
     local required=(qemu-system-i386 expect)
     local missing=()
@@ -58,8 +52,8 @@ check_dependencies() {
 
     if [ ${#missing[@]} -gt 0 ]; then
         error "Missing required tools: ${missing[*]}"
-        echo "Install with: brew install qemu expect   # macOS"
-        echo "         or: sudo apt-get install qemu-system-x86 expect   # Debian/Ubuntu"
+        echo "Install with: brew install qemu expect"
+        echo "         or: sudo apt-get install qemu-system-x86 expect"
         exit 1
     fi
 
@@ -81,7 +75,6 @@ check_dependencies() {
     fi
 }
 
-# Create bootable test ISO
 create_test_iso() {
     local iso_dir="$TEST_RESULTS/iso_$TIMESTAMP"
     local iso_file="$TEST_RESULTS/kmOS_test_$TIMESTAMP.iso"
@@ -142,7 +135,7 @@ run_qemu_capture() {
     if [ -n "$TIMEOUT_CMD" ]; then
         "$TIMEOUT_CMD" "$QEMU_TIMEOUT" "${cmd[@]}" > "$log_file" 2>&1 || true
     else
-        # Fallback timeout implementation without timeout/gtimeout
+
         (
             "${cmd[@]}" > "$log_file" 2>&1 &
             qpid=$!
@@ -177,7 +170,7 @@ run_qemu_extended() {
     if [ -n "$TIMEOUT_CMD" ]; then
         "$TIMEOUT_CMD" "$duration" "${cmd[@]}" > "$log_file" 2>&1 || true
     else
-        # Fallback timeout implementation without timeout/gtimeout
+
         (
             "${cmd[@]}" > "$log_file" 2>&1 &
             qpid=$!
@@ -193,7 +186,6 @@ run_qemu_extended() {
     fi
 }
 
-# Test 1: Basic boot test
 test_basic_boot() {
     local log_file="$TEST_RESULTS/boot_test_$TIMESTAMP.log"
 
@@ -201,11 +193,11 @@ test_basic_boot() {
 
     run_qemu_capture "$log_file"
 
-    # Determine boot success by presence of early KMAIN/ARCH prints
+
     if grep -q -E "KMAIN: Serial port initialized|\\[ARCH\\] Starting x86 architecture initialization" "$log_file"; then
         success "Basic boot detected via serial output"
 
-        # Extra signals for subsystems (non-fatal if missing)
+
         if grep -q -E "VMM initialized|\\[VMM\\]" "$log_file"; then
             success "VMM initialization detected"
         else
@@ -226,7 +218,6 @@ test_basic_boot() {
     fi
 }
 
-# Test 2: Memory allocation test
 test_memory_allocation() {
     local log_file="$TEST_RESULTS/memory_test_$TIMESTAMP.log"
     
@@ -234,7 +225,7 @@ test_memory_allocation() {
 
     run_qemu_capture "$log_file"
     
-    # Analyze memory-related output
+
     local memory_systems=0
     
     if grep -q -i "buddy.*allocator\|buddy.*init" "$log_file"; then
@@ -257,7 +248,7 @@ test_memory_allocation() {
         ((memory_systems++))
     fi
 
-    # Count VMM init as a memory system signal
+
     if grep -q -E "VMM initialized|\\[VMM\\]" "$log_file"; then
         success "VMM init detected (memory subsystem)"
         ((memory_systems++))
@@ -272,7 +263,6 @@ test_memory_allocation() {
     fi
 }
 
-# Test 3: COW functionality test
 test_cow_functionality() {
     local log_file="$TEST_RESULTS/cow_test_$TIMESTAMP.log"
     

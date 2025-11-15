@@ -6,8 +6,8 @@
 
 enum
 {
-  USER_ROOT, // root user
-  USER_NORM  // normal user
+  USER_ROOT,
+  USER_NORM
 };
 
 class User : public File
@@ -34,9 +34,9 @@ public:
   u32 getUType();
 
 protected:
-  u32 utype;          // user type (root or normal)
-  User *unext;        // pointer to the next user in the list
-  char password[512]; // user password
+  u32 utype;
+  User *unext;
+  char password[512];
 };
 
 #endif

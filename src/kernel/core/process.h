@@ -3,36 +3,32 @@
 
 #include <core/file.h>
 #include <runtime/list.h>
-#include <archprocess.h> // Definition of process_st
+#include <archprocess.h>
 #include <core/signal.h>
 #include <runtime/buffer.h>
 #include <api/dev/proc.h>
 
-// State definitions for the process
 #define ZOMBIE PROC_STATE_ZOMBIE
 #define CHILD PROC_STATE_RUN
 #define RUNNING 1
 #define SLEEPING 2
 #define READY 4
 
-// Structure to represent an open file in a process
 struct openfile
 {
-  u32 mode; // Mode of opening the file
-  u32 ptr;  // Read/write pointer
-  File *fp; // Pointer to the open file
+  u32 mode;
+  u32 ptr;
+  File *fp;
 };
 
-// Process class inherits from File
 class Process : public File
 {
 public:
   friend class Architecture;
 
-  Process(char *n); // Constructor
-  ~Process();       // Destructor
+  Process(char *n);
+  ~Process();
 
-  // File operations overridden from File
   u32 open(u32 flag) override;
   u32 close() override;
   u32 read(u32 pos, u8 *buffer, u32 size) override;
@@ -41,7 +37,6 @@ public:
   u32 remove() override;
   void scan() override;
 
-  // Process-specific operations
   u32 create(char *file, int argc, char **argv);
   void sendSignal(int sig);
   u32 wait();
@@ -53,14 +48,12 @@ public:
   void exit();
   int fork();
 
-  // State management
   void setState(u8 st);
   u8 getState();
   void setFile(u32 fd, File *fp, u32 ptr, u32 mode);
   void setPid(u32 pid);
   u32 getPid();
 
-  // Process scheduling
   void setPNext(Process *p);
   Process *schedule();
   Process *getPNext();
@@ -70,7 +63,6 @@ public:
 
   void reset_pinfo();
 
-  // Getters/Setters for the current directory
   File *getCurrentDir();
   void setCurrentDir(File *f);
   
@@ -78,23 +70,23 @@ public:
   u32 get_time_slice_count();
 
 protected:
-  static u32 proc_pid; // Static PID tracker
+  static u32 proc_pid;
 
-  u32 pid;                          // Process ID
-  u8 state;                         // Process state
-  Process *pparent;                 // Parent process
-  Process *pnext;                   // Next process in the schedule
-  openfile openfp[CONFIG_MAX_FILE]; // Array of open files
-  proc_info ppinfo;                 // Process information
-  process_st info;                  // Architecture-specific process info
-  File *cdir;                       // Current directory
-  Buffer *ipc;                      // Inter-process communication buffer
+  u32 pid;
+  u8 state;
+  Process *pparent;
+  Process *pnext;
+  openfile openfp[CONFIG_MAX_FILE];
+  proc_info ppinfo;
+  process_st info;
+  File *cdir;
+  Buffer *ipc;
   
   u64 total_runtime;
   u64 last_scheduled;
   u32 time_slice;
 
-  static char *default_tty; // Default TTY device
+  static char *default_tty;
 };
 
-#endif // PROC_H
+#endif

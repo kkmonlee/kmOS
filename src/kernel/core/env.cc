@@ -52,15 +52,14 @@ Variable::Variable(const char *n, const char *v) : File((char*)n, TYPE_FILE)
 
 u32 Variable::open(u32 flag)
 {
-  return RETURN_OK; // always succeeds
+  return RETURN_OK;
 }
 
 u32 Variable::close()
 {
-  return RETURN_OK; // always succeeds
+  return RETURN_OK;
 }
 
-/* reads the value into the buffer */
 u32 Variable::read(u32 pos, u8 *buffer, u32 size)
 {
   if (value_ == nullptr)
@@ -68,7 +67,7 @@ u32 Variable::read(u32 pos, u8 *buffer, u32 size)
     return NOT_DEFINED;
   }
 
-  size_t read_size = strnlen(value_, size); // safely copy up to `size` bytes
+  size_t read_size = strnlen(value_, size);
   strncpy((char *)buffer, value_, read_size);
   return read_size;
 }
@@ -92,7 +91,6 @@ u32 Variable::write(u32 pos, u8 *buffer, u32 size)
   return NOT_DEFINED;
 }
 
-// Variable control via ioctl - supports querying and setting variable properties
 u32 Variable::ioctl(u32 id, u8 *buffer)
 {
   if (!buffer) {
@@ -100,7 +98,7 @@ u32 Variable::ioctl(u32 id, u8 *buffer)
   }
 
   switch (id) {
-    case 0: // Get variable name
+    case 0:
       {
         const char* var_name = getName();
         if (var_name) {
@@ -112,16 +110,16 @@ u32 Variable::ioctl(u32 id, u8 *buffer)
         return 0;
       }
 
-    case 1: // Get variable size
+    case 1:
       {
         u32 sz = getSize();
         memcpy(buffer, &sz, sizeof(u32));
         return sizeof(u32);
       }
 
-    case 2: // Check if variable is read-only (future extension)
+    case 2:
       {
-        u32 readonly = 0; // Currently all variables are writable
+        u32 readonly = 0;
         memcpy(buffer, &readonly, sizeof(u32));
         return sizeof(u32);
       }

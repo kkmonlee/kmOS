@@ -4,7 +4,6 @@
 
 Keyboard keyboard;
 
-// US QWERTY keyboard layout
 static char scancode_to_char[128] = {
     0,    0,   '1', '2', '3', '4', '5', '6',     // 0x00-0x07
     '7', '8',  '9', '0', '-', '=',   8,   9,     // 0x08-0x0F (8=backspace, 9=tab)
@@ -24,7 +23,6 @@ static char scancode_to_char[128] = {
     0,    0,    0,   0,   0,   0,   0,   0       // 0x78-0x7F
 };
 
-// Shifted characters
 static char scancode_to_char_shift[128] = {
     0,    0,   '!', '@', '#', '$', '%', '^',     // 0x00-0x07
     '&', '*',  '(', ')', '_', '+',   8,   9,     // 0x08-0x0F
@@ -56,7 +54,6 @@ void Keyboard::init() {
     state.alt_pressed = false;
     state.caps_lock = false;
     
-    // Clear the keyboard buffer
     while (read_status() & KEYBOARD_STATUS_OUT_BUFFER_FULL) {
         read_data();
     }
@@ -83,7 +80,6 @@ void Keyboard::write_data(u8 data) {
 }
 
 void Keyboard::handle_interrupt() {
-    // Read scancode only if output buffer set, otherwise spurious
     if (!(read_status() & KEYBOARD_STATUS_OUT_BUFFER_FULL)) {
         return;
     }
@@ -91,11 +87,9 @@ void Keyboard::handle_interrupt() {
     bool key_released = (scancode & 0x80) != 0;
     u8 key = scancode & 0x7F;
     
-    // Update modifier key states
     update_key_state(key, !key_released);
     
     if (!key_released) {
-        // Key press
         char c = scancode_to_ascii(key, state.shift_pressed || state.caps_lock);
         if (c != 0) {
             add_to_buffer(c);
@@ -183,7 +177,6 @@ int Keyboard::read_line(char* buffer, int max_len) {
     char c;
     
     while (pos < max_len - 1) {
-        // IRQ-driven: wait until buffer has data (filled by ISR)
         while (!char_available()) {
             asm volatile("hlt");
         }
@@ -215,7 +208,6 @@ void Keyboard::clear_buffer() {
     buffer_count = 0;
 }
 
-// C interface functions
 extern "C" {
     void keyboard_interrupt_handler() {
         keyboard.handle_interrupt();

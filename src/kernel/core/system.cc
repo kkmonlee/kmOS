@@ -25,13 +25,11 @@ void System::init()
 {
   var = fsm.path("/sys/env/");
 
-  // system users
   root = new User(const_cast<char*>("root"));
   root->setUType(USER_ROOT);
 
   actual = new User(const_cast<char*>("liveuser"));
 
-  // environment variables
   uservar = new Variable("USER", "liveuser");
   new Variable("OS_NAME", KERNEL_NAME);
   new Variable("OS_VERSION", KERNEL_VERSION);
@@ -45,18 +43,17 @@ void System::init()
   new Variable("SHELL", "/bin/sh");
 }
 
-// login function
 int System::login(User *us, char *pass)
 {
   if (us == NULL)
     return ERROR_PARAM;
 
   if (us->getPassword() != NULL)
-  {                   // user has a password
-    if (pass == NULL) // no password provided
+  {
+    if (pass == NULL)
       return PARAM_NULL;
     if (strncmp(pass, us->getPassword(), strlen(us->getPassword())))
-      return RETURN_FAILURE; // password mismatch
+      return RETURN_FAILURE;
   }
 
   uservar->write(0, (u8 *)us->getName(), strlen(us->getName()));
@@ -64,7 +61,6 @@ int System::login(User *us, char *pass)
   return RETURN_OK;
 }
 
-// retrieves the value of a variable; caller must free the memory
 char *System::getvar(char *name)
 {
   File *temp = var->find(name);
@@ -77,7 +73,6 @@ char *System::getvar(char *name)
   return varin;
 }
 
-// retrieves a user by name
 User *System::getUser(char *nae)
 {
   User *us = listuser;
@@ -90,7 +85,6 @@ User *System::getUser(char *nae)
   return NULL;
 }
 
-// adds a user to the user list
 void System::addUserToList(User *us)
 {
   if (us == NULL)
@@ -99,7 +93,7 @@ void System::addUserToList(User *us)
   listuser = us;
 }
 
-// checks if the current user is root
+
 u32 System::isRoot()
 {
   return (actual != NULL && actual->getUType() == USER_ROOT) ? 1 : 0;

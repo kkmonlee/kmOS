@@ -1,7 +1,7 @@
 #ifndef API_H
 #define API_H
 
-// posix
+
 void call_open();
 void call_close();
 void call_read();

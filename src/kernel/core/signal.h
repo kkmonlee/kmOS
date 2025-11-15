@@ -45,7 +45,7 @@
 #define SIG_DFL 0
 #define SIG_IGN 1
 
-// Signal handling macros
+
 #define set_signal(mask, sig) *(mask) |= ((u32)1 << (sig - 1))
 #define clear_signal(mask, sig) *(mask) &= ~((u32)1 << (sig - 1))
 #define is_signal(mask, sig) ((mask) & ((u32)1 << (sig - 1)))

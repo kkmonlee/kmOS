@@ -19,7 +19,7 @@ public:
   void scan() override;
 
 protected:
-  // additional member variables can be added here if needed
+
 };
 
-#endif // MODLINK_H
+#endif

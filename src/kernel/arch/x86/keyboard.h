@@ -3,12 +3,12 @@
 
 #include <runtime/types.h>
 
-// Keyboard controller ports
+
 #define KEYBOARD_DATA_PORT    0x60
 #define KEYBOARD_STATUS_PORT  0x64
 #define KEYBOARD_COMMAND_PORT 0x64
 
-// Keyboard controller status register bits
+
 #define KEYBOARD_STATUS_OUT_BUFFER_FULL  0x01
 #define KEYBOARD_STATUS_IN_BUFFER_FULL   0x02
 #define KEYBOARD_STATUS_SYSTEM_FLAG      0x04
@@ -18,7 +18,7 @@
 #define KEYBOARD_STATUS_TIMEOUT          0x40
 #define KEYBOARD_STATUS_PARITY_ERROR     0x80
 
-// Special key codes
+
 #define KEY_ESC       0x01
 #define KEY_BACKSPACE 0x0E
 #define KEY_TAB       0x0F
@@ -61,7 +61,7 @@ public:
     bool key_pressed(u8 scancode);
     void handle_interrupt();
     
-    // Shell input functions
+
     int read_line(char* buffer, int max_len);
     void clear_buffer();
 
@@ -86,7 +86,7 @@ private:
 
 extern Keyboard keyboard;
 
-// C interface for interrupt handling
+
 extern "C" {
     void keyboard_interrupt_handler();
     void init_keyboard();

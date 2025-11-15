@@ -28,18 +28,18 @@
 #define ALLOC_FLAG_SCOPED   0x40
 
 enum alloc_type {
-    ALLOC_TINY = 0,      // < 64 bytes
-    ALLOC_SMALL = 1,     // 64-512 bytes
-    ALLOC_MEDIUM = 2,    // 512-4096 bytes  
-    ALLOC_LARGE = 3,     // 4KB-64KB
-    ALLOC_HUGE = 4       // > 64KB
+    ALLOC_TINY = 0,
+    ALLOC_SMALL = 1,
+    ALLOC_MEDIUM = 2,
+    ALLOC_LARGE = 3,
+    ALLOC_HUGE = 4
 };
 
 enum system_mode {
-    SYS_MODE_EMBEDDED = 0,    // Low memory, optimize for space
-    SYS_MODE_DESKTOP = 1,     // Balanced performance/memory
-    SYS_MODE_SERVER = 2,      // High performance, SMP optimized
-    SYS_MODE_REALTIME = 3     // Deterministic allocation times
+    SYS_MODE_EMBEDDED = 0,
+    SYS_MODE_DESKTOP = 1,
+    SYS_MODE_SERVER = 2,
+    SYS_MODE_REALTIME = 3
 };
 
 struct alloc_stats {

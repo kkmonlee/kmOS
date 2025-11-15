@@ -137,4 +137,4 @@ public:
 
 extern Ext2Filesystem ext2_driver;
 
-#endif // EXT2_H
+#endif

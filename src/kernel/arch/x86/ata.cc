@@ -31,7 +31,6 @@ constexpr u8 ATA_SR_BSY = 0x80;
 constexpr u32 ATA_SECTOR_SIZE = 512;
 
 static void ata_io_wait(u16 ctrl_base) {
-    // 400ns delay: read Alternate Status four times
     io.inb(ctrl_base + ATA_REG_ALTSTATUS);
     io.inb(ctrl_base + ATA_REG_ALTSTATUS);
     io.inb(ctrl_base + ATA_REG_ALTSTATUS);
@@ -45,7 +44,7 @@ static void serial_print_ata(const char* str) {
     }
 }
 
-} // namespace
+}
 
 ATADevice::ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave)
     : BlockDevice(name, ATA_SECTOR_SIZE), io_base_(io_base), ctrl_base_(ctrl_base), slave_(slave) {
@@ -115,7 +114,6 @@ bool ATADevice::initialize() {
         buffer[i] = io.inw(io_base_ + ATA_REG_DATA);
     }
 
-    // Parse model string (words 27-46)
     for (u32 i = 0; i < 20; ++i) {
         u16 word = buffer[27 + i];
         identify_.model[i * 2] = (char)((word >> 8) & 0xFF);
@@ -123,7 +121,6 @@ bool ATADevice::initialize() {
     }
     identify_.model[40] = '\0';
 
-    // Trim trailing spaces
     for (int i = 39; i >= 0; --i) {
         if (identify_.model[i] == ' ' || identify_.model[i] == '\0') {
             identify_.model[i] = '\0';
@@ -186,36 +183,30 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
         if (!wait_busy())
             return RETURN_FAILURE;
 
-        // Set up write command (ATA_CMD_WRITE_SECTORS = 0x30)
         io.outb(io_base_ + ATA_REG_SECCOUNT0, 1);
         io.outb(io_base_ + ATA_REG_LBA0, (u8)((lba + sector) & 0xFF));
         io.outb(io_base_ + ATA_REG_LBA1, (u8)(((lba + sector) >> 8) & 0xFF));
         io.outb(io_base_ + ATA_REG_LBA2, (u8)(((lba + sector) >> 16) & 0xFF));
-        io.outb(io_base_ + ATA_REG_COMMAND, 0x30); // WRITE_SECTORS command
+        io.outb(io_base_ + ATA_REG_COMMAND, 0x30);
 
-        // Wait for device to be ready for data
         if (!wait_data_ready())
             return RETURN_FAILURE;
 
-        // Write sector data (512 bytes = 256 words)
         for (u32 i = 0; i < ATA_SECTOR_SIZE / 2; ++i) {
             u16 data = in[sector * ATA_SECTOR_SIZE + i * 2] |
                       (in[sector * ATA_SECTOR_SIZE + i * 2 + 1] << 8);
             io.outw(io_base_ + ATA_REG_DATA, data);
         }
 
-        // Wait for write to complete
         if (!wait_busy())
             return RETURN_FAILURE;
 
-        // Check for errors
         u8 status = io.inb(io_base_ + ATA_REG_STATUS);
         if (status & (ATA_SR_ERR | ATA_SR_DF))
             return RETURN_FAILURE;
     }
 
-    // Flush cache after writes
-    io.outb(io_base_ + ATA_REG_COMMAND, 0xE7); // CACHE_FLUSH command
+    io.outb(io_base_ + ATA_REG_COMMAND, 0xE7);
     wait_busy();
 
     return RETURN_OK;

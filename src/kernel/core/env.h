@@ -19,7 +19,7 @@ public:
   void scan() override;
 
 protected:
-  char *value_; // stores the variable's value
+  char *value_;
 };
 
 #endif

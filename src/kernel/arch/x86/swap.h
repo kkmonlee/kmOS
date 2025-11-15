@@ -99,7 +99,7 @@ public:
     void add_to_lru(u32 virtual_addr);
     void remove_from_lru(u32 virtual_addr);
     
-    // Advanced page replacement integration
+
     void set_replacement_algorithm(u32 algorithm);
     u32 get_replacement_algorithm();
     void tune_replacement_performance();
@@ -108,7 +108,7 @@ public:
     void get_memory_stats(struct memory_stats *stats);
     void print_swap_stats();
     
-    // Public accessor for swap device list (for monitoring/debugging)
+
     struct swap_device* get_swap_devices() const { return swap_devices; }
     u32 get_total_swap_pages() const { return total_swap_pages; }
     u32 get_used_swap_pages() const { return used_swap_pages; }

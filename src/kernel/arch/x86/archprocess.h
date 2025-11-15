@@ -39,4 +39,4 @@ extern "C"
   } __attribute__((packed));
 }
 
-#endif // APROC_H
+#endif

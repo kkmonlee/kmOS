@@ -24,4 +24,4 @@ enum
 #define TABLE_KEYBOARD_SIZE 388
 #define API_KEYBOARD_SET_TABLE 0x4122
 
-#endif // __API_KEYBOARD__
+#endif

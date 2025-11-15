@@ -33,7 +33,7 @@ void SwapManager::init() {
     swap_out_count = 0;
     reclaim_attempts = 0;
     
-    // Initialize advanced page replacement manager
+
     page_replacement_manager.init();
     
     io.print("[SWAP] Swap manager initialized with advanced page replacement\n");
@@ -405,11 +405,11 @@ void SwapManager::print_swap_stats() {
     io.print("  Swap-outs: %d\n", swap_out_count);
     io.print("  Reclaim attempts: %d\n", reclaim_attempts);
     
-    // Print page replacement algorithm statistics
+
     page_replacement_manager.print_algorithm_performance();
 }
 
-// Advanced page replacement integration methods
+
 void SwapManager::set_replacement_algorithm(u32 algorithm) {
     if (algorithm < PR_ALGORITHM_COUNT) {
         io.print("[SWAP] Setting page replacement algorithm to %d\n", algorithm);
@@ -424,44 +424,44 @@ u32 SwapManager::get_replacement_algorithm() {
 }
 
 void SwapManager::tune_replacement_performance() {
-    // Automatically tune replacement algorithm based on current performance
+
     u32 pressure = check_memory_pressure();
     
     struct replacement_stats current_stats;
     page_replacement_manager.get_replacement_stats(&current_stats);
     
-    // If we have high memory pressure and many dirty writebacks, switch to algorithm
-    // that prefers clean pages
+
+
     if (pressure >= MEMORY_PRESSURE_HIGH) {
         if (current_stats.dirty_writebacks > current_stats.total_replacements / 2) {
-            // Too many dirty writebacks, switch to enhanced LRU
+
             io.print("[SWAP] High dirty writeback ratio, switching to Enhanced LRU\n");
             set_replacement_algorithm(PR_ALGORITHM_LRU_ENHANCED);
         } else if (get_replacement_algorithm() == PR_ALGORITHM_FIFO) {
-            // FIFO under high pressure is not optimal, switch to Clock
+
             io.print("[SWAP] High memory pressure with FIFO, switching to Clock\n");
             set_replacement_algorithm(PR_ALGORITHM_CLOCK);
         }
     } else if (pressure <= MEMORY_PRESSURE_LOW) {
-        // Low pressure, standard LRU is fine
+
         if (get_replacement_algorithm() != PR_ALGORITHM_LRU) {
             io.print("[SWAP] Low memory pressure, switching to standard LRU\n");
             set_replacement_algorithm(PR_ALGORITHM_LRU);
         }
     }
     
-    // Performance-based tuning
+
     if (current_stats.hits + current_stats.misses > 1000) {
         u32 hit_rate = (current_stats.hits * 100) / (current_stats.hits + current_stats.misses);
         
         if (hit_rate < 70) {
-            // Low hit rate, try enhanced LRU
+
             if (get_replacement_algorithm() == PR_ALGORITHM_LRU) {
                 io.print("[SWAP] Low hit rate (%d%%), switching to Enhanced LRU\n", hit_rate);
                 set_replacement_algorithm(PR_ALGORITHM_LRU_ENHANCED);
             }
         } else if (hit_rate > 90) {
-            // Very high hit rate, simpler algorithm is fine
+
             if (get_replacement_algorithm() == PR_ALGORITHM_LRU_ENHANCED) {
                 io.print("[SWAP] High hit rate (%d%%), switching to standard LRU\n", hit_rate);
                 set_replacement_algorithm(PR_ALGORITHM_LRU);
@@ -471,7 +471,7 @@ void SwapManager::tune_replacement_performance() {
 }
 
 struct page_descriptor* SwapManager::get_optimal_victim_page() {
-    // First try using the advanced page replacement manager
+
     struct page_descriptor* victim = page_replacement_manager.find_victim_page();
     
     if (victim) {
@@ -479,12 +479,12 @@ struct page_descriptor* SwapManager::get_optimal_victim_page() {
         return victim;
     }
     
-    // Fallback to legacy LRU if no victim found in advanced manager
+
     struct page_lru *lru_victim = find_victim_page();
     if (lru_victim) {
         io.print("[SWAP] Legacy LRU selected victim page %x\n", lru_victim->virtual_addr);
         
-        // Create a page_descriptor for compatibility
+
         struct page_descriptor *desc = (struct page_descriptor *)kmalloc(sizeof(struct page_descriptor));
         if (desc) {
             desc->virtual_addr = lru_victim->virtual_addr;

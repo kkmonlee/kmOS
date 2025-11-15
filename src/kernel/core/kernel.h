@@ -8,4 +8,4 @@
 #include <io.h>
 #include <vmm.h>
 
-#endif // KERNEL_H
+#endif

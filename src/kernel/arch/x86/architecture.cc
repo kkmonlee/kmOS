@@ -66,7 +66,7 @@ void Architecture::configure_scheduler(u32 pit_frequency_hz)
         pit_frequency_hz = PIT_DEFAULT_FREQ;
     }
 
-    const u32 desired_quantum_ms = 20; // 20ms default time slice
+    const u32 desired_quantum_ms = 20;
     u32 ticks = (pit_frequency_hz * desired_quantum_ms) / 1000;
     if (ticks == 0)
     {

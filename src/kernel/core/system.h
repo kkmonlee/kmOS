@@ -18,14 +18,14 @@ public:
   User *getUser(char *name);
 
   int login(User *us, char *pass);
-  u32 isRoot(); // returns 1 if root user
+  u32 isRoot();
 
 private:
-  User *listuser;    // list of users
-  File *var;         // file for system variables
-  User *actual;      // currently logged-in user
-  User *root;        // root user
-  Variable *uservar; // variable for user-specific data
+  User *listuser;
+  File *var;
+  User *actual;
+  User *root;
+  Variable *uservar;
 };
 
 extern System sys;

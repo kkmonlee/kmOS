@@ -12,15 +12,12 @@ VMM vmm;
 struct page_directory *kernel_directory = 0;
 struct page_directory *current_directory = 0;
 
-// Physical memory starts at 1MB to avoid BIOS regions
 #define PHYS_MEM_START 0x100000
 #define FRAME_SIZE 4096
-#define MAX_FRAMES 0x100000  // Support up to 4GB of RAM
+#define MAX_FRAMES 0x100000
 
-// Static frame bitmap to avoid kmalloc dependency during early boot
 static u32 static_frame_bitmap[MAX_FRAMES / 32];
 
-// Serial debugging functions for VMM
 static void serial_outb_vmm(unsigned short port, unsigned char data) {
     asm volatile("outb %0, %1" : : "a"(data), "Nd"(port));
 }
@@ -73,7 +70,6 @@ void VMM::init() {
     init_stack_allocator();
     init_unified_allocator(SYS_MODE_DESKTOP);
     init_cow_manager();
-    // init_swap_manager(); // Temporarily disabled for testing
     
     io.print("[VMM] Paging enabled with %d frames available\n", frame_count - frames_used);
 }

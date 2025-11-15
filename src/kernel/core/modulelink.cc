@@ -11,7 +11,7 @@ ModLink::ModLink(const char *name) : File((char*)name, TYPE_FILE)
 
 ModLink::~ModLink()
 {
-  // cleanup code if necessary
+
 }
 
 u32 ModLink::open(u32 flag)
@@ -47,5 +47,5 @@ u32 ModLink::remove()
 
 void ModLink::scan()
 {
-  // implementation if needed
+
 }

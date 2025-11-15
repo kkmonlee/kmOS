@@ -193,7 +193,6 @@ u32 Process::create(char *file, int argc, char **argv)
     setState(ZOMBIE);
   }
 
-  // Set stdin, stdout, and stderr
   if (pparent != NULL)
   {
     for (int i = 0; i < 3; i++)
@@ -287,7 +286,7 @@ u32 Process::addFile(File *f, u32 m)
       return i;
     }
   }
-  return -1; // Indicate failure to add file
+  return -1;
 }
 
 File *Process::getFile(u32 fd)
@@ -359,14 +358,13 @@ void Process::reset_pinfo()
   ppinfo.pid = pid;
   ppinfo.tid = 0;
   ppinfo.state = state;
-  ppinfo.vmem = 10 * 1024 * 1024; // Example values
+  ppinfo.vmem = 10 * 1024 * 1024;
   ppinfo.pmem = 10 * 1024 * 1024;
 }
 
 void Process::scan() {
 }
 
-/* Directory management */
 File *Process::getCurrentDir()
 {
   return cdir;

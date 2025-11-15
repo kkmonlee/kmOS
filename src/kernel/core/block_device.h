@@ -19,4 +19,4 @@ protected:
     u32 block_size_;
 };
 
-#endif // BLOCK_DEVICE_H
+#endif

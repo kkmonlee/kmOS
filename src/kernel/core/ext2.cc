@@ -130,7 +130,7 @@ public:
             return block_number != 0;
         }
 
-        // Double and triple indirect blocks not supported yet
+
         return false;
     }
 
@@ -323,11 +323,11 @@ File *Ext2Filesystem::mount(File *mount_point, BlockDevice *device) {
     Ext2Directory *root = new Ext2Directory(name, mount, EXT2_ROOT_INO, true);
 
     if (parent) {
-        // Remove the old mount point and replace it with the ext2 root
+
         delete mount_point;
         parent->addChild(root);
     } else {
-        // mounting root filesystem
+
         delete mount_point;
         root->setParent(nullptr);
     }

@@ -242,7 +242,6 @@ void call_getdents()
   {
     if (i == (info->ptr))
     {
-      // io.print("readdir=%s  - size=%d  entry=%x\n",child->getName(),size,entry);
       nentry.d_ino = child->getInode();
       strncpy(nentry.d_name, child->getName(), 256);
       memcpy((char *)entry, (char *)&nentry, size);
@@ -257,26 +256,18 @@ void call_getdents()
   return;
 }
 
-/*
- *	int wait(int* status);
- */
 void call_wait()
 {
   u32 *status = (u32 *)arch.getArg(1);
   *status = 0;
   Process *p = arch.pcurrent;
   u32 ret = p->wait();
-  // arch.setRet(ret);
 }
 
-/*
- *	int dup2( int old_fd, int new_fd );
- */
 void call_dup2()
 {
   u32 oldfd = arch.getArg(0);
   u32 newfd = arch.getArg(1);
-  // io.print("dup2 %d to %d\n",oldfd,newfd);
   u32 ret = newfd;
   Process *p = arch.pcurrent;
   p->setFile((u32)newfd, p->getFile(oldfd), 0, 0);

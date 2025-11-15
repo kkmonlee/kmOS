@@ -16,7 +16,7 @@ static const char* algorithm_names[] = {
     "LRU", "FIFO", "Clock", "Enhanced LRU"
 };
 
-// Get system memory pressure level (0-100)
+
 static u32 get_memory_pressure() {
     extern VMM vmm;
     
@@ -24,7 +24,7 @@ static u32 get_memory_pressure() {
         return 0;
     }
     
-    // Calculate pressure percentage based on used frames
+
     return (vmm.frames_used * 100) / vmm.frame_count;
 }
 
@@ -37,7 +37,7 @@ void PageReplacementManager::init() {
     total_pages = 0;
     access_counter = 0;
     
-    // Initialize algorithm-specific structures
+
     lru_head = nullptr;
     lru_tail = nullptr;
     fifo_head = nullptr;
@@ -45,7 +45,7 @@ void PageReplacementManager::init() {
     clock_hand = nullptr;
     clock_size = 0;
     
-    // Clear all statistics
+
     for (int i = 0; i < PR_ALGORITHM_COUNT; i++) {
         memset(&stats[i], 0, sizeof(struct replacement_stats));
     }
@@ -64,18 +64,18 @@ void PageReplacementManager::set_algorithm(PageReplacementAlgorithm algorithm) {
     io.print("[PAGE_REPL] Switching from %s to %s algorithm\n", 
              algorithm_names[current_algorithm], algorithm_names[algorithm]);
     
-    // Save current stats
+
     stats[current_algorithm] = current_stats;
     current_stats.algorithm_switches++;
     
     current_algorithm = algorithm;
     
-    // Reorganize existing pages for new algorithm
+
     struct page_descriptor *page = page_list_head;
     while (page) {
         struct page_descriptor *next = page->next;
         
-        // Remove from old algorithm structures
+
         switch (stats[current_algorithm].algorithm_switches > 0 ? 
                (PageReplacementAlgorithm)((current_algorithm + PR_ALGORITHM_COUNT - 1) % PR_ALGORITHM_COUNT) : 
                current_algorithm) {
@@ -93,7 +93,7 @@ void PageReplacementManager::set_algorithm(PageReplacementAlgorithm algorithm) {
                 break;
         }
         
-        // Add to new algorithm structures
+
         switch (current_algorithm) {
             case PR_ALGORITHM_LRU:
             case PR_ALGORITHM_LRU_ENHANCED:
@@ -169,18 +169,18 @@ void PageReplacementManager::add_page(u32 virtual_addr, u32 physical_addr, u32 f
     page->last_access_time = get_system_time();
     page->creation_time = page->last_access_time;
     
-    // Get actual process ID from architecture
+
     page->process_id = (arch.pcurrent != nullptr) ? arch.pcurrent->getPid() : 0;
     page->next = nullptr;
     page->prev = nullptr;
     
-    // Initialize algorithm-specific data
+
     page->lru_data.lru_position = 0;
     page->fifo_data.queue_position = 0;
     page->clock_data.clock_hand_passed = 0;
     page->clock_data.reference_bit = 1;
     
-    // Add to general page list
+
     if (page_list_tail) {
         page_list_tail->next = page;
         page->prev = page_list_tail;
@@ -189,7 +189,7 @@ void PageReplacementManager::add_page(u32 virtual_addr, u32 physical_addr, u32 f
         page_list_head = page_list_tail = page;
     }
     
-    // Add to algorithm-specific structures
+
     switch (current_algorithm) {
         case PR_ALGORITHM_LRU:
         case PR_ALGORITHM_LRU_ENHANCED:
@@ -214,7 +214,7 @@ void PageReplacementManager::remove_page(u32 virtual_addr) {
         return;
     }
     
-    // Remove from algorithm-specific structures
+
     switch (current_algorithm) {
         case PR_ALGORITHM_LRU:
         case PR_ALGORITHM_LRU_ENHANCED:
@@ -230,7 +230,7 @@ void PageReplacementManager::remove_page(u32 virtual_addr) {
             break;
     }
     
-    // Remove from general list
+
     if (page->prev) {
         page->prev->next = page->next;
     } else {
@@ -268,23 +268,23 @@ void PageReplacementManager::update_page_access(u32 virtual_addr) {
             clock_update_access(page);
             break;
         case PR_ALGORITHM_FIFO:
-            // FIFO doesn't update on access
+
             break;
         default:
             break;
     }
 }
 
-// LRU Algorithm Implementation
+
 struct page_descriptor* PageReplacementManager::lru_find_victim() {
     if (!lru_tail) {
         return nullptr;
     }
     
-    // Find the least recently used page (at tail)
+
     struct page_descriptor *victim = lru_tail;
     
-    // Skip locked pages
+
     while (victim && (victim->flags & PR_FLAG_LOCKED)) {
         victim = victim->prev;
     }
@@ -319,14 +319,14 @@ void PageReplacementManager::lru_remove_page(struct page_descriptor *page) {
 }
 
 void PageReplacementManager::lru_update_access(struct page_descriptor *page) {
-    // Remove from current position
+
     lru_remove_page(page);
     
-    // Add to head (most recently used)
+
     lru_add_page(page);
 }
 
-// FIFO Algorithm Implementation
+
 struct page_descriptor* PageReplacementManager::fifo_find_victim() {
     if (!fifo_tail) {
         return nullptr;
@@ -334,7 +334,7 @@ struct page_descriptor* PageReplacementManager::fifo_find_victim() {
     
     struct page_descriptor *victim = fifo_tail;
     
-    // Skip locked pages
+
     while (victim && (victim->flags & PR_FLAG_LOCKED)) {
         victim = victim->prev;
     }
@@ -368,7 +368,7 @@ void PageReplacementManager::fifo_remove_page(struct page_descriptor *page) {
     }
 }
 
-// Clock Algorithm Implementation
+
 struct page_descriptor* PageReplacementManager::clock_find_victim() {
     if (clock_size == 0) {
         return nullptr;
@@ -379,16 +379,16 @@ struct page_descriptor* PageReplacementManager::clock_find_victim() {
         start = clock_hand = page_list_head;
     }
     
-    // Clock algorithm: look for page with reference bit = 0
+
     do {
         if (!(clock_hand->flags & PR_FLAG_LOCKED)) {
             if (clock_hand->clock_data.reference_bit == 0) {
-                // Found victim
+
                 struct page_descriptor *victim = clock_hand;
                 clock_hand = clock_hand->next ? clock_hand->next : page_list_head;
                 return victim;
             } else {
-                // Give second chance, clear reference bit
+
                 clock_hand->clock_data.reference_bit = 0;
                 clock_hand->clock_data.clock_hand_passed++;
             }
@@ -397,7 +397,7 @@ struct page_descriptor* PageReplacementManager::clock_find_victim() {
         clock_hand = clock_hand->next ? clock_hand->next : page_list_head;
     } while (clock_hand != start);
     
-    // If all pages are locked, return the current hand position
+
     return clock_hand;
 }
 
@@ -425,7 +425,7 @@ void PageReplacementManager::clock_update_access(struct page_descriptor *page) {
     page->clock_data.reference_bit = 1;
 }
 
-// Enhanced LRU Algorithm Implementation
+
 struct page_descriptor* PageReplacementManager::lru_enhanced_find_victim() {
     u32 best_score = 0xFFFFFFFF;
     struct page_descriptor *best_victim = nullptr;
@@ -541,29 +541,29 @@ void PageReplacementManager::reset_stats() {
 }
 
 int PageReplacementManager::set_memory_pressure_algorithm() {
-    // Automatically choose algorithm based on actual memory pressure from VMM
+
     u32 pressure = get_memory_pressure();
     
     if (pressure < 50) {
-        // Low pressure: use sophisticated LRU
+
         set_algorithm(PR_ALGORITHM_LRU);
         return 0;
     } else if (pressure < 80) {
-        // Medium pressure: use enhanced LRU with aging
+
         set_algorithm(PR_ALGORITHM_LRU_ENHANCED);
         return 1;
     } else if (pressure < 95) {
-        // High pressure: use faster Clock algorithm
+
         set_algorithm(PR_ALGORITHM_CLOCK);
         return 2;
     } else {
-        // Critical pressure: use simplest FIFO
+
         set_algorithm(PR_ALGORITHM_FIFO);
         return 3;
     }
 }
 
-// C interface functions
+
 extern "C" {
     void init_page_replacement() {
         page_replacement_manager.init();

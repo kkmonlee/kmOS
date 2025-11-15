@@ -10,7 +10,7 @@ public:
   explicit Device(const char *name);
   virtual ~Device();
 
-  // overrides
+
   virtual u32 open(u32 flag) override;
   virtual u32 close() override;
   virtual u32 read(u32 pos, u8 *buffer, u32 size) override;
@@ -20,7 +20,7 @@ public:
   virtual void scan() override;
 
 protected:
-  char *name_; // device name
+  char *name_;
 };
 
-#endif // DEVICE_H
+#endif

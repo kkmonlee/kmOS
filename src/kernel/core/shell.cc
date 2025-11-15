@@ -25,7 +25,6 @@ extern "C" {
 extern IO io;
 extern Keyboard keyboard;
 
-// Serial output helper
 static void serial_print_shell(const char* str) {
     while (*str) {
         asm volatile("outb %0, %1" : : "a"(*str), "Nd"((unsigned short)0x3F8));
@@ -35,7 +34,6 @@ static void serial_print_shell(const char* str) {
 
 Shell shell;
 
-// Built-in command table
 static struct shell_command builtin_commands[] = {
     {"help",    "Show this help message",                 nullptr},
     {"echo",    "Display a line of text",                 nullptr},
@@ -61,7 +59,6 @@ void Shell::init() {
     io.print("[SHELL] Initializing shell\n");
     
     serial_print_shell("[SHELL] About to strcpy\n");
-    // Initialize state
     strcpy(state.current_directory, "/");
     serial_print_shell("[SHELL] strcpy done\n");
     memset(state.command_buffer, 0, MAX_COMMAND_LENGTH);
@@ -72,7 +69,6 @@ void Shell::init() {
     state.exit_code = 0;
     
     serial_print_shell("[SHELL] About to init history\n");
-    // Initialize command history
     for (int i = 0; i < MAX_HISTORY; i++) {
         state.command_history[i] = nullptr;
     }
@@ -89,7 +85,6 @@ void Shell::init_commands() {
     command_count = sizeof(builtin_commands) / sizeof(struct shell_command);
     commands = builtin_commands;
     
-    // Set up function pointers
     commands[0].handler = [](int argc, char** argv) { return shell.cmd_help(argc, argv); };
     commands[1].handler = [](int argc, char** argv) { return shell.cmd_echo(argc, argv); };
     commands[2].handler = [](int argc, char** argv) { return shell.cmd_clear(argc, argv); };
@@ -125,12 +120,10 @@ void Shell::run() {
         print_prompt();
         serial_print_shell("[SHELL] Prompt printed, waiting for input\n");
         
-        // Read command line
         int len = keyboard.read_line(state.command_buffer, MAX_COMMAND_LENGTH);
         serial_print_shell("[SHELL] keyboard.read_line returned\n");
         
         if (len > 0) {
-            // Parse and execute command
             char* args[MAX_ARGS];
             int argc = parse_command(state.command_buffer, args);
             
@@ -171,11 +164,9 @@ int Shell::parse_command(const char* input, char** args) {
     char* token = buffer;
     bool in_quotes = false;
     
-    // Simple tokenization
     for (int i = 0; buffer[i] && argc < MAX_ARGS - 1; i++) {
         if (buffer[i] == '"') {
             in_quotes = !in_quotes;
-            // Remove quotes
             for (int j = i; buffer[j]; j++) {
                 buffer[j] = buffer[j + 1];
             }
@@ -185,7 +176,6 @@ int Shell::parse_command(const char* input, char** args) {
             if (strlen(token) > 0) {
                 args[argc++] = token;
             }
-            // Skip whitespace
             while (buffer[i + 1] && (buffer[i + 1] == ' ' || buffer[i + 1] == '\t')) {
                 i++;
             }
@@ -193,7 +183,6 @@ int Shell::parse_command(const char* input, char** args) {
         }
     }
     
-    // Add last token
     if (strlen(token) > 0) {
         args[argc++] = token;
     }
@@ -224,7 +213,6 @@ struct shell_command* Shell::find_command(const char* name) {
     return nullptr;
 }
 
-// Built-in command implementations
 int Shell::cmd_help(int argc, char** argv) {
     (void)argc; (void)argv;
     
@@ -292,7 +280,6 @@ int Shell::cmd_cd(int argc, char** argv) {
     const char* new_dir = argv[1];
     
     if (strcmp(new_dir, "..") == 0) {
-        // Go to parent directory
         char* last_slash = strrchr(state.current_directory, '/');
         if (last_slash && last_slash != state.current_directory) {
             *last_slash = '\0';
@@ -300,10 +287,8 @@ int Shell::cmd_cd(int argc, char** argv) {
             strcpy(state.current_directory, "/");
         }
     } else if (strcmp(new_dir, ".") == 0) {
-        // Stay in current directory
         return 0;
     } else {
-        // Change to specified directory
         char* full_path = get_full_path(new_dir);
         if (full_path) {
             File* dir = fsm.path(full_path);
@@ -392,7 +377,6 @@ int Shell::cmd_ps(int argc, char** argv) {
     
     io.print("PID  PPID STATE      CMD\n");
     
-    // Iterate through process list
     Process* p = arch.plist;
     if (p == nullptr) {
         io.print("No processes running\n");
@@ -427,14 +411,12 @@ int Shell::cmd_ps(int argc, char** argv) {
 int Shell::cmd_mem(int argc, char** argv) {
     (void)argc; (void)argv;
     
-    // Get actual memory statistics from VMM
     extern VMM vmm;
     
     u32 total_frames = vmm.frame_count;
     u32 used_frames = vmm.frames_used;
     u32 free_frames = total_frames - used_frames;
     
-    // Each frame is 4KB
     u32 total_kb = total_frames * 4;
     u32 used_kb = used_frames * 4;
     u32 free_kb = free_frames * 4;
@@ -467,11 +449,10 @@ int Shell::cmd_swap(int argc, char** argv) {
     u32 used_swap = 0;
     u32 device_count = 0;
     
-    // Count swap devices and calculate totals
     struct swap_device* dev = swap_manager.get_swap_devices();
     while (dev != nullptr) {
         device_count++;
-        total_swap += dev->pages * 4; // Each page is 4KB
+        total_swap += dev->pages * 4;
         used_swap += dev->inuse_pages * 4;
         dev = dev->next;
     }
@@ -537,7 +518,6 @@ int Shell::cmd_uname(int argc, char** argv) {
 int Shell::cmd_exit(int argc, char** argv) {
     int code = 0;
     if (argc > 1) {
-        // Simple string to int conversion
         code = 0;
         for (int i = 0; argv[1][i]; i++) {
             if (argv[1][i] >= '0' && argv[1][i] <= '9') {
@@ -549,7 +529,6 @@ int Shell::cmd_exit(int argc, char** argv) {
     return code;
 }
 
-// Utility command stubs
 int Shell::cmd_mkdir(int argc, char** argv) {
     (void)argc; (void)argv;
     io.print("mkdir: command not yet implemented\n");
@@ -574,12 +553,10 @@ int Shell::cmd_mv(int argc, char** argv) {
     return 1;
 }
 
-// Utility functions
 void Shell::clear_screen() {
-    // VGA text mode: clear screen by writing spaces
     volatile unsigned short *video_memory = (volatile unsigned short*)0xB8000;
     for (int i = 0; i < 80 * 25; i++) {
-        video_memory[i] = 0x0720; // Space character with light gray on black
+        video_memory[i] = 0x0720;
     }
 }
 
@@ -591,7 +568,6 @@ void Shell::add_to_history(const char* command) {
             state.history_count++;
         }
     } else {
-        // Shift history and add new command
         kfree(state.command_history[0]);
         for (int i = 0; i < MAX_HISTORY - 1; i++) {
             state.command_history[i] = state.command_history[i + 1];
@@ -622,7 +598,7 @@ bool Shell::is_absolute_path(const char* path) {
 char* Shell::join_path(const char* dir, const char* file) {
     int dir_len = strlen(dir);
     int file_len = strlen(file);
-    int total_len = dir_len + file_len + 2; // +1 for '/', +1 for '\0'
+    int total_len = dir_len + file_len + 2;
     
     char* result = (char*)kmalloc(total_len);
     if (!result) return nullptr;
@@ -642,7 +618,6 @@ void Shell::exit(int code) {
     io.print("Goodbye!\n");
 }
 
-// C interface functions
 extern "C" {
     void init_shell() {
         shell.init();

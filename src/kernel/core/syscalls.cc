@@ -5,15 +5,15 @@
 
 #define sysc(a, h) add(a, (syscall_handler)h)
 
-// init syscall table with default handlers
+
 void Syscalls::init()
 {
   for (int i = 0; i < NB_SYSCALLS; i++)
   {
-    calls[i] = NULL; // set all handlers to NULL initially
+    calls[i] = NULL;
   }
 
-  // add specific syscall handlers
+
   sysc(SYS_open, &call_open);
   sysc(SYS_close, &call_close);
   sysc(SYS_read, &call_read);
@@ -31,17 +31,17 @@ void Syscalls::init()
   sysc(SYS_mmap, &call_mmap);
 }
 
-// add a handler to the syscall table
+
 void Syscalls::add(u32 num, syscall_handler h)
 {
   calls[num] = h;
 }
 
-// call a handler by its syscall number
+
 void Syscalls::call(u32 num)
 {
   if (calls[num] != NULL)
   {
-    calls[num](); // execute the handler if it exists
+    calls[num]();
   }
 }

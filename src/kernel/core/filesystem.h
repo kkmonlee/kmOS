@@ -45,11 +45,11 @@ private:
   MountInfo mounts[kMaxMounts];
   u32 mount_count;
 
-  File *root; // root directory
-  File *dev;  // device directory
-  File *var;  // variable directory
+  File *root;
+  File *dev;
+  File *var;
 };
 
 extern Filesystem fsm;
 
-#endif // FILESYSTEM_H
+#endif

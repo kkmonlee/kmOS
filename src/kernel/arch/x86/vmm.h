@@ -7,7 +7,7 @@
 #include <x86.h>
 #include <archprocess.h>
 
-// Page directory entry structure
+
 struct page_directory_entry {
     u32 present : 1;
     u32 writable : 1;
@@ -22,7 +22,7 @@ struct page_directory_entry {
     u32 frame : 20;
 } __attribute__((packed));
 
-// Page table entry structure
+
 struct page_table_entry {
     u32 present : 1;
     u32 writable : 1;
@@ -44,7 +44,7 @@ struct swapped_page_entry {
     struct swapped_page_entry *next;
 };
 
-// Page directory structure
+
 struct page_directory {
     struct page_directory_entry tables[1024];
     struct page_table_entry *page_tables[1024];
@@ -52,14 +52,14 @@ struct page_directory {
     struct swapped_page_entry *swapped_pages;
 };
 
-// Physical memory frame management
+
 struct page_frame {
     u32 address;
     u32 ref_count;
     struct page_frame *next;
 };
 
-// VMM class for managing virtual memory
+
 class VMM {
 public:
     void init();

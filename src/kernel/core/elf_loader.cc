@@ -13,11 +13,11 @@ extern "C" {
     void *memset(void *s, int c, int n);
 }
 
-// default process name and counter
+
 const char *__default_proc_name = "_proc_";
 char nb_default = '0';
 
-// checks if the file is in elf format
+
 int is_elf(char *file)
 {
   Elf32_Ehdr *hdr = (Elf32_Ehdr *)file;
@@ -27,7 +27,7 @@ int is_elf(char *file)
              : ERROR_PARAM;
 }
 
-// loads elf into memory and returns the entry point
+
 u32 load_elf(char *file, process_st *proc)
 {
   Elf32_Ehdr *hdr = (Elf32_Ehdr *)file;
@@ -77,7 +77,7 @@ u32 load_elf(char *file, process_st *proc)
   return hdr->e_entry;
 }
 
-// creates and executes a new process from an elf file
+
 int execv(char *file, int argc, char **argv)
 {
   extern Filesystem fsm;
@@ -98,7 +98,7 @@ int execv(char *file, int argc, char **argv)
   return (int)proc->getPid();
 }
 
-// executes a module at the given entry point
+
 void execv_module(u32 entry, int argc, char **argv)
 {
   char *name = (char*)((argc <= 0) ? __default_proc_name : argv[0]);

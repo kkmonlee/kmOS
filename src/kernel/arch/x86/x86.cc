@@ -14,7 +14,6 @@ extern "C" {
 extern "C"
 {
 
-  // reads CPU information using CPUID instruction
   regs_t cpu_cpuid(int /*code*/)
   {
     regs_t r;
@@ -25,7 +24,6 @@ extern "C"
     return r;
   }
 
-  // retrieves CPU vendor name
   u32 cpu_vendor_name(char *name)
   {
     regs_t r = cpu_cpuid(0x00);
@@ -46,15 +44,14 @@ extern "C"
 
   void schedule();
 
-  idtdesc kidt[IDTSIZE];  // idt table
-  int_desc intt[IDTSIZE]; // interrupt functions table
-  gdtdesc kgdt[GDTSIZE];  // gdt table
-  tss default_tss;        // task state segment
-  gdtr kgdtr;             // gdtr registry
-  idtr kidtr;             // idtr registry
+  idtdesc kidt[IDTSIZE];
+  int_desc intt[IDTSIZE];
+  gdtdesc kgdt[GDTSIZE];
+  tss default_tss;
+  gdtr kgdtr;
+  idtr kidtr;
   u32 *stack_ptr = nullptr;
 
-  // initializes a gdt descriptor
   void init_gdt_desc(u32 base, u32 limite, u8 acces, u8 other, struct gdtdesc *desc)
   {
     desc->lim0_15 = (limite & 0xffff);
@@ -66,7 +63,6 @@ extern "C"
     desc->base24_31 = (base >> 24) & 0xff;
   }
 
-  // initializes the gdt
   void init_gdt(void)
   {
     default_tss.debug_flag = 0x00;
@@ -74,27 +70,23 @@ extern "C"
     default_tss.esp0 = 0x1FFF0;
     default_tss.ss0 = 0x18;
 
-    // set up gdt segments
-    init_gdt_desc(0x0, 0x0, 0x0, 0x0, &kgdt[0]);                  // null descriptor
-    init_gdt_desc(0x0, 0xFFFFF, 0x9B, 0x0D, &kgdt[1]);            // kernel code
-    init_gdt_desc(0x0, 0xFFFFF, 0x93, 0x0D, &kgdt[2]);            // kernel data
-    init_gdt_desc(0x0, 0x0, 0x97, 0x0D, &kgdt[3]);                // kernel stack
-    init_gdt_desc(0x0, 0xFFFFF, 0xFF, 0x0D, &kgdt[4]);            // user code
-    init_gdt_desc(0x0, 0xFFFFF, 0xF3, 0x0D, &kgdt[5]);            // user data
-    init_gdt_desc(0x0, 0x0, 0xF7, 0x0D, &kgdt[6]);                // user stack
-    init_gdt_desc((u32)&default_tss, 0x67, 0xE9, 0x00, &kgdt[7]); // tss
+    init_gdt_desc(0x0, 0x0, 0x0, 0x0, &kgdt[0]);
+    init_gdt_desc(0x0, 0xFFFFF, 0x9B, 0x0D, &kgdt[1]);
+    init_gdt_desc(0x0, 0xFFFFF, 0x93, 0x0D, &kgdt[2]);
+    init_gdt_desc(0x0, 0x0, 0x97, 0x0D, &kgdt[3]);
+    init_gdt_desc(0x0, 0xFFFFF, 0xFF, 0x0D, &kgdt[4]);
+    init_gdt_desc(0x0, 0xFFFFF, 0xF3, 0x0D, &kgdt[5]);
+    init_gdt_desc(0x0, 0x0, 0xF7, 0x0D, &kgdt[6]);
+    init_gdt_desc((u32)&default_tss, 0x67, 0xE9, 0x00, &kgdt[7]);
 
-    // set up gdtr
     kgdtr.limite = GDTSIZE * 8;
     kgdtr.base = GDTBASE;
 
-    // copy gdt to memory
     memcpy((char *)kgdtr.base, (char *)kgdt, kgdtr.limite);
 
     asm volatile ("lgdt (%0)" :: "r"(&kgdtr));
   }
 
-  // initializes an idt descriptor
   void init_idt_desc(u16 select, u32 offset, u16 type, struct idtdesc *desc)
   {
     desc->offset0_15 = offset & 0xffff;
@@ -103,7 +95,7 @@ extern "C"
     desc->offset16_31 = (offset >> 16) & 0xffff;
   }
 
-  // initializes the idt
+
   void init_idt(void)
   {
     for (int i = 0; i < IDTSIZE; i++)
@@ -111,25 +103,21 @@ extern "C"
       init_idt_desc(0x08, 0, INTGATE, &kidt[i]);
     }
 
-    // exceptions
-    init_idt_desc(0x08, 0, INTGATE, &kidt[13]); // general protection
-    init_idt_desc(0x08, 0, INTGATE, &kidt[14]); // page fault
+    init_idt_desc(0x08, 0, INTGATE, &kidt[13]);
+    init_idt_desc(0x08, 0, INTGATE, &kidt[14]);
 
-    // interrupts
-    init_idt_desc(0x08, (u32)_asm_int_32, INTGATE, &kidt[32]);      // timer IRQ0
-    init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);      // keyboard IRQ1
-    init_idt_desc(0x08, 0, TRAPGATE, &kidt[128]); // syscalls
+    init_idt_desc(0x08, (u32)_asm_int_32, INTGATE, &kidt[32]);
+    init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);
+    init_idt_desc(0x08, 0, TRAPGATE, &kidt[128]);
 
     kidtr.limite = IDTSIZE * 8;
     kidtr.base = IDTBASE;
 
-    // copy idt to memory
     memcpy((char *)kidtr.base, (char *)kidt, kidtr.limite);
 
     asm volatile ("lidt (%0)" :: "r"(&kidtr));
   }
 
-  // initializes the programmable interrupt controller
   void init_pic(void)
   {
     io.outb(0x20, 0x11); // ICW1

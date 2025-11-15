@@ -4,16 +4,16 @@
 #include <runtime/types.h>
 
 /* descriptor table sizes */
-#define IDTSIZE 0xFF // maximum descriptors in IDT
-#define GDTSIZE 0xFF // maximum descriptors in GDT
+#define IDTSIZE 0xFF
+#define GDTSIZE 0xFF
 
 /* base addresses for descriptor tables */
-#define IDTBASE 0x00000000 // physical address for IDT
-#define GDTBASE 0x00000800 // physical address for GDT
+#define IDTBASE 0x00000000
+#define GDTBASE 0x00000800
 
 /* gate types */
-#define INTGATE 0x8E00  // used for handling interrupts
-#define TRAPGATE 0xEF00 // used for system calls
+#define INTGATE 0x8E00
+#define TRAPGATE 0xEF00
 
 /* memory layout definitions */
 #define KERN_PDIR 0x00001000
@@ -37,8 +37,8 @@
 #define PAGE(addr) ((addr) >> 12)
 
 /* control register flags */
-#define PAGING_FLAG 0x80000000 // CR0 - bit 31
-#define PSE_FLAG 0x00000010    // CR4 - bit 4
+#define PAGING_FLAG 0x80000000
+#define PSE_FLAG 0x00000010
 
 /* page table and directory flags */
 #define PG_PRESENT 0x00000001
@@ -133,4 +133,4 @@ extern "C"
     int handle_signal(int);
 }
 
-#endif // __X86__
+#endif

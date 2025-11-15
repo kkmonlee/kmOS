@@ -19,7 +19,7 @@ public:
   void scan() override;
 
 protected:
-  // TODO: maybe socket name? or socket type?
+
 };
 
-#endif // SOCKET_H
+#endif

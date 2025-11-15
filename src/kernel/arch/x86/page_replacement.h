@@ -86,19 +86,19 @@ private:
     struct replacement_stats stats[PR_ALGORITHM_COUNT];
     struct replacement_stats current_stats;
     
-    // LRU specific data
+
     struct page_descriptor *lru_head;
     struct page_descriptor *lru_tail;
     
-    // FIFO specific data
+
     struct page_descriptor *fifo_head;
     struct page_descriptor *fifo_tail;
     
-    // Clock specific data
+
     struct page_descriptor *clock_hand;
     u32 clock_size;
     
-    // Algorithm implementations
+
     struct page_descriptor* lru_find_victim();
     struct page_descriptor* fifo_find_victim();
     struct page_descriptor* clock_find_victim();

@@ -56,7 +56,7 @@ public:
 
 protected:
   static u32 inode_system;
-  char *map_memory; // mmap
+  char *map_memory;
   char *name;
   u32 size;
   u8 type;
@@ -68,7 +68,7 @@ protected:
   File *child;
   File *next;
   File *prec;
-  File *device; // device master of current file
+  File *device;
 };
 
-#endif // FILE_H
+#endif

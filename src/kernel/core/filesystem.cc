@@ -12,8 +12,6 @@ extern "C" {
 
 #include <arch/x86/architecture.h>
 
-// class to manage file hierarchy
-
 Filesystem::Filesystem()
   : driver_count(0), mount_count(0), root(nullptr), dev(nullptr), var(nullptr) {
   for (u32 i = 0; i < kMaxDrivers; ++i) {
@@ -31,14 +29,14 @@ void Filesystem::init()
 {
   root = new File("/", TYPE_DIRECTORY);
 
-  dev = root->createChild("dev", TYPE_DIRECTORY);        // device folder
-  root->createChild("proc", TYPE_DIRECTORY);             // process folder
-  root->createChild("mnt", TYPE_DIRECTORY);              // mount points folder
-  File *sysd = root->createChild("sys", TYPE_DIRECTORY); // system folder
-  var = sysd->createChild("env", TYPE_DIRECTORY);        // environment variables
-  sysd->createChild("usr", TYPE_DIRECTORY);              // user data
-  sysd->createChild("mods", TYPE_DIRECTORY);             // modules
-  sysd->createChild("sockets", TYPE_DIRECTORY);          // sockets
+  dev = root->createChild("dev", TYPE_DIRECTORY);
+  root->createChild("proc", TYPE_DIRECTORY);
+  root->createChild("mnt", TYPE_DIRECTORY);
+  File *sysd = root->createChild("sys", TYPE_DIRECTORY);
+  var = sysd->createChild("env", TYPE_DIRECTORY);
+  sysd->createChild("usr", TYPE_DIRECTORY);
+  sysd->createChild("mods", TYPE_DIRECTORY);
+  sysd->createChild("sockets", TYPE_DIRECTORY);
 }
 
 Filesystem::~Filesystem()
@@ -51,12 +49,7 @@ void Filesystem::mknod(const char *module, const char *name, u32 flag)
   if (!module || !name || !dev)
     return;
 
-  // Create device node in /dev
   File *device_node = dev->createChild(name, TYPE_DEVICE);
-  if (device_node) {
-    // Device node created successfully
-    // Module parameter could be used for driver registration (future extension)
-  }
 }
 
 File *Filesystem::getRoot()

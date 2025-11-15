@@ -23,12 +23,10 @@ u32 BlockDevice::read(u32 pos, u8* buffer, u32 size) {
     u8 temp_block[1024];
 
     if (block_size_ > sizeof(temp_block)) {
-        // fallback: allocate dynamically for large blocks
         u8* temp = (u8*)kmalloc(block_size_);
         if (!temp) {
             return ERROR_MEMORY;
         }
-        // handle unaligned head
         if (offset) {
             if (read_blocks(lba, 1, temp) != RETURN_OK) {
                 kfree(temp);
@@ -63,7 +61,6 @@ u32 BlockDevice::read(u32 pos, u8* buffer, u32 size) {
         return RETURN_OK;
     }
 
-    // handle unaligned head
     if (offset) {
         if (read_blocks(lba, 1, temp_block) != RETURN_OK) {
             return RETURN_FAILURE;
@@ -78,7 +75,6 @@ u32 BlockDevice::read(u32 pos, u8* buffer, u32 size) {
         lba++;
     }
 
-    // aligned body
     while (total >= block_size_) {
         if (read_blocks(lba, 1, buffer) != RETURN_OK) {
             return RETURN_FAILURE;
@@ -88,7 +84,6 @@ u32 BlockDevice::read(u32 pos, u8* buffer, u32 size) {
         lba++;
     }
 
-    // tail
     if (total) {
         if (read_blocks(lba, 1, temp_block) != RETURN_OK) {
             return RETURN_FAILURE;
@@ -110,13 +105,11 @@ u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
     u8 temp_block[1024];
 
     if (block_size_ > sizeof(temp_block)) {
-        // Allocate dynamically for large blocks
         u8* temp = (u8*)kmalloc(block_size_);
         if (!temp) {
             return ERROR_MEMORY;
         }
 
-        // Handle unaligned head (read-modify-write)
         if (offset) {
             if (read_blocks(lba, 1, temp) != RETURN_OK) {
                 kfree(temp);
@@ -136,7 +129,6 @@ u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
             lba++;
         }
 
-        // Aligned body - direct writes
         while (total >= block_size_) {
             if (write_blocks(lba, 1, buffer) != RETURN_OK) {
                 kfree(temp);
@@ -147,7 +139,6 @@ u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
             lba++;
         }
 
-        // Tail (read-modify-write)
         if (total) {
             if (read_blocks(lba, 1, temp) != RETURN_OK) {
                 kfree(temp);
@@ -164,7 +155,6 @@ u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
         return RETURN_OK;
     }
 
-    // Handle unaligned head (read-modify-write)
     if (offset) {
         if (read_blocks(lba, 1, temp_block) != RETURN_OK) {
             return RETURN_FAILURE;
@@ -182,7 +172,6 @@ u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
         lba++;
     }
 
-    // Aligned body - direct writes
     while (total >= block_size_) {
         if (write_blocks(lba, 1, buffer) != RETURN_OK) {
             return RETURN_FAILURE;
@@ -192,7 +181,6 @@ u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
         lba++;
     }
 
-    // Tail (read-modify-write)
     if (total) {
         if (read_blocks(lba, 1, temp_block) != RETURN_OK) {
             return RETURN_FAILURE;

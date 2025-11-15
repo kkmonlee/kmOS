@@ -31,11 +31,11 @@ public:
     void run();
     void exit(int code);
     
-    // Command parsing
+
     int parse_command(const char* input, char** args);
     int execute_command(int argc, char** args);
     
-    // Built-in commands
+
     int cmd_help(int argc, char** argv);
     int cmd_echo(int argc, char** argv);
     int cmd_clear(int argc, char** argv);
@@ -54,7 +54,7 @@ public:
     int cmd_uname(int argc, char** argv);
     int cmd_exit(int argc, char** argv);
     
-    // Utility functions
+
     void print_prompt();
     void print_banner();
     void add_to_history(const char* command);
@@ -76,7 +76,7 @@ private:
 
 extern Shell shell;
 
-// C interface
+
 extern "C" {
     void init_shell();
     void run_shell();

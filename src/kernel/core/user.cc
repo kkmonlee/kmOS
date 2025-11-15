@@ -54,8 +54,6 @@ u32 User::remove()
 }
 
 void User::scan() {
-  // User objects don't have children to scan
-  // This is a leaf node in the filesystem hierarchy
 }
 
 void User::setPassword(char *n)
@@ -63,7 +61,7 @@ void User::setPassword(char *n)
   if (n == nullptr)
     return;
   memset(password, 0, sizeof(password));
-  strncpy(password, n, sizeof(password) - 1); // prevent buffer overflow
+  strncpy(password, n, sizeof(password) - 1);
 }
 
 char *User::getPassword()

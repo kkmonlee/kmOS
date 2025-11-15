@@ -34,4 +34,4 @@ private:
 void ata_init();
 ATADevice* ata_primary_master();
 
-#endif // ATA_H
+#endif
