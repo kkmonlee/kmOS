@@ -184,11 +184,24 @@ u32 File::remove()
 }
 
 /**
- * Returns the file statistics (placeholder implementation).
+ * Returns the file statistics with actual data.
  */
 stat_fs File::stat()
 {
   stat_fs st;
+  st.st_dev = 0;        // Device ID (0 for virtual filesystem)
+  st.st_ino = 0;        // Inode number (not implemented yet)
+  st.st_mode = type;    // File type from our TYPE_* constants
+  st.st_nlink = 1;      // Number of hard links
+  st.st_uid = 0;        // User ID
+  st.st_gid = 0;        // Group ID
+  st.st_rdev = 0;       // Device ID (if special file)
+  st.st_size = getSize(); // File size in bytes
+  st.st_blksize = 4096; // Block size for filesystem I/O
+  st.st_blocks = (getSize() + 4095) / 4096; // Number of 512B blocks allocated
+  st.st_atime = 0;      // Time of last access (not tracked yet)
+  st.st_mtime = 0;      // Time of last modification (not tracked yet)
+  st.st_ctime = 0;      // Time of last status change (not tracked yet)
   return st;
 }
 

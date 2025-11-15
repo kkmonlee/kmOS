@@ -168,11 +168,14 @@ int Process::fork()
   
   int ret = arch.createProc(&child->info, nullptr, 0, nullptr);
   if (ret == 1) {
+    child->setState(READY);
+    arch.addProcess(child);
     if (pparent != NULL) {
       pparent->sendSignal(SIGCHLD);
     }
     return child->pid;
   } else {
+    child->setState(ZOMBIE);
     return 0;
   }
 }
@@ -180,7 +183,15 @@ int Process::fork()
 u32 Process::create(char *file, int argc, char **argv)
 {
   int ret = arch.createProc(&info, file, argc, argv);
-  setState((ret == 1) ? CHILD : ZOMBIE);
+  if (ret == 1)
+  {
+    setState(READY);
+    arch.addProcess(this);
+  }
+  else
+  {
+    setState(ZOMBIE);
+  }
 
   // Set stdin, stdout, and stderr
   if (pparent != NULL)

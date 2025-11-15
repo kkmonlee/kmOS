@@ -27,6 +27,8 @@ struct openfile
 class Process : public File
 {
 public:
+  friend class Architecture;
+
   Process(char *n); // Constructor
   ~Process();       // Destructor
 

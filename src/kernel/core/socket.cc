@@ -42,4 +42,7 @@ u32 Socket::remove()
   return RETURN_OK;
 }
 
-void Socket::scan() {}
+void Socket::scan() {
+  // Socket objects don't have children to enumerate
+  // Scan is a no-op for network endpoints
+}

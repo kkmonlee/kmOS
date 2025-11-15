@@ -53,7 +53,10 @@ u32 User::remove()
   return RETURN_OK;
 }
 
-void User::scan() {}
+void User::scan() {
+  // User objects don't have children to scan
+  // This is a leaf node in the filesystem hierarchy
+}
 
 void User::setPassword(char *n)
 {

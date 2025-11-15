@@ -1,8 +1,12 @@
 #include <os.h>
 #include <shell.h>
 #include <filesystem.h>
+#include <process.h>
+#include <arch/x86/architecture.h>
 #include <arch/x86/keyboard.h>
 #include <arch/x86/pit.h>
+#include <arch/x86/vmm.h>
+#include <arch/x86/swap.h>
 #include <runtime/alloc.h>
 
 extern "C" {
@@ -107,21 +111,24 @@ void Shell::init_commands() {
 
 void Shell::run() {
     serial_print_shell("[SHELL] run() called\n");
-    io.print("[SHELL] About to print banner\n");
-    serial_print_shell("[SHELL] io.print returned from banner message\n");
+    
     print_banner();
     serial_print_shell("[SHELL] print_banner() returned\n");
-    io.print("[SHELL] Banner printed, entering main loop\n");
+    
     state.running = true;
+    
+    serial_print_shell("[SHELL] Entering main loop\n");
     
     while (state.running) {
         serial_print_shell("[SHELL] Loop iteration start\n");
-        io.print("[SHELL] About to print prompt\n");
+        
         print_prompt();
-        io.print("[SHELL] Prompt printed, waiting for input\n");
+        serial_print_shell("[SHELL] Prompt printed, waiting for input\n");
         
         // Read command line
         int len = keyboard.read_line(state.command_buffer, MAX_COMMAND_LENGTH);
+        serial_print_shell("[SHELL] keyboard.read_line returned\n");
+        
         if (len > 0) {
             // Parse and execute command
             char* args[MAX_ARGS];
@@ -138,17 +145,22 @@ void Shell::run() {
 }
 
 void Shell::print_banner() {
+    serial_print_shell("[SHELL] print_banner() - clearing screen\n");
     clear_screen();
+    serial_print_shell("[SHELL] print_banner() - screen cleared\n");
     io.print("╔════════════════════════════════════════════════════════════════════════════════╗\n");
     io.print("║                                    kmOS Shell                                  ║\n");
     io.print("║                              Welcome to kmOS v1.0                              ║\n");
     io.print("╚════════════════════════════════════════════════════════════════════════════════╝\n");
     io.print("\n");
     io.print("Type 'help' for a list of available commands.\n\n");
+    serial_print_shell("[SHELL] print_banner() - all prints done\n");
 }
 
 void Shell::print_prompt() {
+    serial_print_shell("[SHELL] print_prompt() called\n");
     io.print("kmOS:%s$ ", state.current_directory);
+    serial_print_shell("[SHELL] print_prompt() done\n");
 }
 
 int Shell::parse_command(const char* input, char** args) {
@@ -377,31 +389,121 @@ int Shell::cmd_cat(int argc, char** argv) {
 
 int Shell::cmd_ps(int argc, char** argv) {
     (void)argc; (void)argv;
-    io.print("PID  PPID CMD\n");
-    io.print("  1     0 kernel\n");
-    io.print("  2     1 shell\n");
+    
+    io.print("PID  PPID STATE      CMD\n");
+    
+    // Iterate through process list
+    Process* p = arch.plist;
+    if (p == nullptr) {
+        io.print("No processes running\n");
+        return 0;
+    }
+    
+    Process* start = p;
+    do {
+        const char* state_str = "UNKNOWN";
+        u8 state = p->getState();
+        
+        if (state == RUNNING || state == CHILD) {
+            state_str = "RUNNING";
+        } else {
+            switch (state) {
+                case READY: state_str = "READY"; break;
+                case SLEEPING: state_str = "SLEEPING"; break;
+                case ZOMBIE: state_str = "ZOMBIE"; break;
+                default: state_str = "INVALID"; break;
+            }
+        }
+        
+        u32 ppid = (p->getPParent() != nullptr) ? p->getPParent()->getPid() : 0;
+        io.print("%3d  %4d %-10s %s\n", p->getPid(), ppid, state_str, p->getName());
+        
+        p = p->getPNext();
+    } while (p != nullptr && p != start);
+    
     return 0;
 }
 
 int Shell::cmd_mem(int argc, char** argv) {
     (void)argc; (void)argv;
-    // TODO: Get actual memory statistics
+    
+    // Get actual memory statistics from VMM
+    extern VMM vmm;
+    
+    u32 total_frames = vmm.frame_count;
+    u32 used_frames = vmm.frames_used;
+    u32 free_frames = total_frames - used_frames;
+    
+    // Each frame is 4KB
+    u32 total_kb = total_frames * 4;
+    u32 used_kb = used_frames * 4;
+    u32 free_kb = free_frames * 4;
+    
+    u32 total_mb = total_kb / 1024;
+    u32 used_mb = used_kb / 1024;
+    u32 free_mb = free_kb / 1024;
+    
+    u32 usage_percent = (used_frames * 100) / total_frames;
+    
     io.print("Memory Information:\n");
-    io.print("  Total Memory:    64 MB\n");
-    io.print("  Used Memory:     12 MB\n");
-    io.print("  Free Memory:     52 MB\n");
-    io.print("  Kernel Memory:    8 MB\n");
-    io.print("  User Memory:      4 MB\n");
+    io.print("  Total Memory:    %d MB (%d KB)\n", total_mb, total_kb);
+    io.print("  Used Memory:     %d MB (%d KB)\n", used_mb, used_kb);
+    io.print("  Free Memory:     %d MB (%d KB)\n", free_mb, free_kb);
+    io.print("  Usage:           %d%%\n", usage_percent);
+    io.print("  Frame Size:      4 KB\n");
+    io.print("  Total Frames:    %d\n", total_frames);
+    io.print("  Used Frames:     %d\n", used_frames);
+    io.print("  Free Frames:     %d\n", free_frames);
+    
     return 0;
 }
 
 int Shell::cmd_swap(int argc, char** argv) {
     (void)argc; (void)argv;
+    
+    extern SwapManager swap_manager;
+    
+    u32 total_swap = 0;
+    u32 used_swap = 0;
+    u32 device_count = 0;
+    
+    // Count swap devices and calculate totals
+    struct swap_device* dev = swap_manager.get_swap_devices();
+    while (dev != nullptr) {
+        device_count++;
+        total_swap += dev->pages * 4; // Each page is 4KB
+        used_swap += dev->inuse_pages * 4;
+        dev = dev->next;
+    }
+    
+    u32 free_swap = total_swap - used_swap;
+    u32 total_mb = total_swap / 1024;
+    u32 used_mb = used_swap / 1024;
+    u32 free_mb = free_swap / 1024;
+    
     io.print("Swap Information:\n");
-    io.print("  Total Swap:       0 MB\n");
-    io.print("  Used Swap:        0 MB\n");
-    io.print("  Free Swap:        0 MB\n");
-    io.print("  Swap Devices:     0\n");
+    io.print("  Total Swap:       %d MB (%d KB)\n", total_mb, total_swap);
+    io.print("  Used Swap:        %d MB (%d KB)\n", used_mb, used_swap);
+    io.print("  Free Swap:        %d MB (%d KB)\n", free_mb, free_swap);
+    io.print("  Swap Devices:     %d\n", device_count);
+    
+    if (device_count > 0) {
+        u32 usage_percent = total_swap > 0 ? (used_swap * 100) / total_swap : 0;
+        io.print("  Swap Usage:       %d%%\n", usage_percent);
+        
+        io.print("\nSwap Devices:\n");
+        dev = swap_manager.get_swap_devices();
+        int idx = 0;
+        while (dev != nullptr) {
+            u32 dev_mb = (dev->pages * 4) / 1024;
+            u32 dev_used_mb = (dev->inuse_pages * 4) / 1024;
+            const char* type_str = (dev->type == SWAP_TYPE_DEVICE) ? "device" : "file";
+            io.print("  [%d] %s (%s): %d MB / %d MB\n", 
+                     idx++, dev->path, type_str, dev_used_mb, dev_mb);
+            dev = dev->next;
+        }
+    }
+    
     return 0;
 }
 

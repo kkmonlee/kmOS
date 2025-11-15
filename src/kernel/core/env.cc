@@ -92,10 +92,43 @@ u32 Variable::write(u32 pos, u8 *buffer, u32 size)
   return NOT_DEFINED;
 }
 
-/* control the variable (TODO) */
+// Variable control via ioctl - supports querying and setting variable properties
 u32 Variable::ioctl(u32 id, u8 *buffer)
 {
-  return NOT_DEFINED; // unimplemented
+  if (!buffer) {
+    return ERROR_PARAM;
+  }
+
+  switch (id) {
+    case 0: // Get variable name
+      {
+        const char* var_name = getName();
+        if (var_name) {
+          int len = 0;
+          while (var_name[len] && len < 255) len++;
+          memcpy(buffer, var_name, len + 1);
+          return len;
+        }
+        return 0;
+      }
+
+    case 1: // Get variable size
+      {
+        u32 sz = getSize();
+        memcpy(buffer, &sz, sizeof(u32));
+        return sizeof(u32);
+      }
+
+    case 2: // Check if variable is read-only (future extension)
+      {
+        u32 readonly = 0; // Currently all variables are writable
+        memcpy(buffer, &readonly, sizeof(u32));
+        return sizeof(u32);
+      }
+
+    default:
+      return NOT_DEFINED;
+  }
 }
 
 u32 Variable::remove()

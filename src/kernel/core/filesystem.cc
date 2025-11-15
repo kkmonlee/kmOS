@@ -48,6 +48,15 @@ Filesystem::~Filesystem()
 
 void Filesystem::mknod(const char *module, const char *name, u32 flag)
 {
+  if (!module || !name || !dev)
+    return;
+
+  // Create device node in /dev
+  File *device_node = dev->createChild(name, TYPE_DEVICE);
+  if (device_node) {
+    // Device node created successfully
+    // Module parameter could be used for driver registration (future extension)
+  }
 }
 
 File *Filesystem::getRoot()

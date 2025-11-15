@@ -38,7 +38,9 @@ _asm_int_%1:
 global _asm_int_32
 _asm_int_32:
     SAVE_REGS
+    push esp
     call isr_timer_int
+    add esp, 4
     mov al, 0x20
     out 0x20, al            ; send EOI to PIC
     RESTORE_REGS

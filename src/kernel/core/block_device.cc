@@ -100,8 +100,108 @@ u32 BlockDevice::read(u32 pos, u8* buffer, u32 size) {
 }
 
 u32 BlockDevice::write(u32 pos, u8* buffer, u32 size) {
-    (void)pos;
-    (void)buffer;
-    (void)size;
-    return RETURN_FAILURE; // write support not implemented
+    if (!buffer || size == 0) {
+        return ERROR_PARAM;
+    }
+
+    u32 lba = pos / block_size_;
+    u32 offset = pos % block_size_;
+    u32 total = size;
+    u8 temp_block[1024];
+
+    if (block_size_ > sizeof(temp_block)) {
+        // Allocate dynamically for large blocks
+        u8* temp = (u8*)kmalloc(block_size_);
+        if (!temp) {
+            return ERROR_MEMORY;
+        }
+
+        // Handle unaligned head (read-modify-write)
+        if (offset) {
+            if (read_blocks(lba, 1, temp) != RETURN_OK) {
+                kfree(temp);
+                return RETURN_FAILURE;
+            }
+            u32 chunk = block_size_ - offset;
+            if (chunk > total) {
+                chunk = total;
+            }
+            memcpy(temp + offset, buffer, chunk);
+            if (write_blocks(lba, 1, temp) != RETURN_OK) {
+                kfree(temp);
+                return RETURN_FAILURE;
+            }
+            buffer += chunk;
+            total -= chunk;
+            lba++;
+        }
+
+        // Aligned body - direct writes
+        while (total >= block_size_) {
+            if (write_blocks(lba, 1, buffer) != RETURN_OK) {
+                kfree(temp);
+                return RETURN_FAILURE;
+            }
+            buffer += block_size_;
+            total -= block_size_;
+            lba++;
+        }
+
+        // Tail (read-modify-write)
+        if (total) {
+            if (read_blocks(lba, 1, temp) != RETURN_OK) {
+                kfree(temp);
+                return RETURN_FAILURE;
+            }
+            memcpy(temp, buffer, total);
+            if (write_blocks(lba, 1, temp) != RETURN_OK) {
+                kfree(temp);
+                return RETURN_FAILURE;
+            }
+        }
+
+        kfree(temp);
+        return RETURN_OK;
+    }
+
+    // Handle unaligned head (read-modify-write)
+    if (offset) {
+        if (read_blocks(lba, 1, temp_block) != RETURN_OK) {
+            return RETURN_FAILURE;
+        }
+        u32 chunk = block_size_ - offset;
+        if (chunk > total) {
+            chunk = total;
+        }
+        memcpy(temp_block + offset, buffer, chunk);
+        if (write_blocks(lba, 1, temp_block) != RETURN_OK) {
+            return RETURN_FAILURE;
+        }
+        buffer += chunk;
+        total -= chunk;
+        lba++;
+    }
+
+    // Aligned body - direct writes
+    while (total >= block_size_) {
+        if (write_blocks(lba, 1, buffer) != RETURN_OK) {
+            return RETURN_FAILURE;
+        }
+        buffer += block_size_;
+        total -= block_size_;
+        lba++;
+    }
+
+    // Tail (read-modify-write)
+    if (total) {
+        if (read_blocks(lba, 1, temp_block) != RETURN_OK) {
+            return RETURN_FAILURE;
+        }
+        memcpy(temp_block, buffer, total);
+        if (write_blocks(lba, 1, temp_block) != RETURN_OK) {
+            return RETURN_FAILURE;
+        }
+    }
+
+    return RETURN_OK;
 }

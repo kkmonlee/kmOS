@@ -2,6 +2,7 @@
 #include <page_replacement.h>
 #include <vmm.h>
 #include <runtime/alloc.h>
+#include <architecture.h>
 
 extern "C" {
     int strlen(const char *s);
@@ -14,6 +15,18 @@ PageReplacementManager page_replacement_manager;
 static const char* algorithm_names[] = {
     "LRU", "FIFO", "Clock", "Enhanced LRU"
 };
+
+// Get system memory pressure level (0-100)
+static u32 get_memory_pressure() {
+    extern VMM vmm;
+    
+    if (vmm.frame_count == 0) {
+        return 0;
+    }
+    
+    // Calculate pressure percentage based on used frames
+    return (vmm.frames_used * 100) / vmm.frame_count;
+}
 
 void PageReplacementManager::init() {
     io.print("[PAGE_REPL] Initializing page replacement manager\n");
@@ -155,7 +168,9 @@ void PageReplacementManager::add_page(u32 virtual_addr, u32 physical_addr, u32 f
     page->access_count = 1;
     page->last_access_time = get_system_time();
     page->creation_time = page->last_access_time;
-    page->process_id = 0; // TODO: Get actual process ID
+    
+    // Get actual process ID from architecture
+    page->process_id = (arch.pcurrent != nullptr) ? arch.pcurrent->getPid() : 0;
     page->next = nullptr;
     page->prev = nullptr;
     
@@ -526,21 +541,23 @@ void PageReplacementManager::reset_stats() {
 }
 
 int PageReplacementManager::set_memory_pressure_algorithm() {
-    // Automatically choose algorithm based on memory pressure
-    // This is a simple heuristic - in practice, you might want more sophisticated logic
-    
-    u32 pressure = 0; // TODO: Get actual memory pressure from VMM
+    // Automatically choose algorithm based on actual memory pressure from VMM
+    u32 pressure = get_memory_pressure();
     
     if (pressure < 50) {
+        // Low pressure: use sophisticated LRU
         set_algorithm(PR_ALGORITHM_LRU);
         return 0;
     } else if (pressure < 80) {
+        // Medium pressure: use enhanced LRU with aging
         set_algorithm(PR_ALGORITHM_LRU_ENHANCED);
         return 1;
     } else if (pressure < 95) {
+        // High pressure: use faster Clock algorithm
         set_algorithm(PR_ALGORITHM_CLOCK);
         return 2;
     } else {
+        // Critical pressure: use simplest FIFO
         set_algorithm(PR_ALGORITHM_FIFO);
         return 3;
     }

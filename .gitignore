@@ -139,3 +139,5 @@ test_page_replacement.cc
 *_swap.cc
 test/
 tests/
+
+integration_tests/results/*.md

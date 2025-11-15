@@ -108,6 +108,11 @@ public:
     void get_memory_stats(struct memory_stats *stats);
     void print_swap_stats();
     
+    // Public accessor for swap device list (for monitoring/debugging)
+    struct swap_device* get_swap_devices() const { return swap_devices; }
+    u32 get_total_swap_pages() const { return total_swap_pages; }
+    u32 get_used_swap_pages() const { return used_swap_pages; }
+    
 private:
     struct swap_device *swap_devices;
     u32 total_swap_pages;

@@ -174,8 +174,51 @@ u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
     return RETURN_OK;
 }
 
-u32 ATADevice::write_blocks(u32, u32, const void*) {
-    return RETURN_FAILURE; // write support not implemented
+u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
+    if (!identify_.present || !buffer || count == 0)
+        return ERROR_PARAM;
+
+    const u8* in = (const u8*)buffer;
+    
+    for (u32 sector = 0; sector < count; ++sector) {
+        select_drive(lba + sector);
+
+        if (!wait_busy())
+            return RETURN_FAILURE;
+
+        // Set up write command (ATA_CMD_WRITE_SECTORS = 0x30)
+        io.outb(io_base_ + ATA_REG_SECCOUNT0, 1);
+        io.outb(io_base_ + ATA_REG_LBA0, (u8)((lba + sector) & 0xFF));
+        io.outb(io_base_ + ATA_REG_LBA1, (u8)(((lba + sector) >> 8) & 0xFF));
+        io.outb(io_base_ + ATA_REG_LBA2, (u8)(((lba + sector) >> 16) & 0xFF));
+        io.outb(io_base_ + ATA_REG_COMMAND, 0x30); // WRITE_SECTORS command
+
+        // Wait for device to be ready for data
+        if (!wait_data_ready())
+            return RETURN_FAILURE;
+
+        // Write sector data (512 bytes = 256 words)
+        for (u32 i = 0; i < ATA_SECTOR_SIZE / 2; ++i) {
+            u16 data = in[sector * ATA_SECTOR_SIZE + i * 2] |
+                      (in[sector * ATA_SECTOR_SIZE + i * 2 + 1] << 8);
+            io.outw(io_base_ + ATA_REG_DATA, data);
+        }
+
+        // Wait for write to complete
+        if (!wait_busy())
+            return RETURN_FAILURE;
+
+        // Check for errors
+        u8 status = io.inb(io_base_ + ATA_REG_STATUS);
+        if (status & (ATA_SR_ERR | ATA_SR_DF))
+            return RETURN_FAILURE;
+    }
+
+    // Flush cache after writes
+    io.outb(io_base_ + ATA_REG_COMMAND, 0xE7); // CACHE_FLUSH command
+    wait_busy();
+
+    return RETURN_OK;
 }
 
 static ATADevice* g_primary_master = nullptr;
