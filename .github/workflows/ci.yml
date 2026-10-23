@@ -1,6 +1,7 @@
 name: kmOS kernel & QEMU integration
 
 on:
+  workflow_dispatch:
   workflow_call:
   push:
     branches: [ master, main, feature/* ]
@@ -10,10 +11,14 @@ on:
 env:
   CROSS_TARGET: i686-elf
 
+permissions:
+  contents: read
+
 jobs:
   build-kernel:
     name: Build Kernel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     
     steps:
     - name: Checkout code

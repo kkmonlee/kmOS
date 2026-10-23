@@ -66,16 +66,16 @@ void operator delete(void *ptr) {
     kfree(ptr);
 }
 
-void operator delete(void *ptr, unsigned long) {
+void operator delete(void *ptr, __SIZE_TYPE__) {
     kfree(ptr);
 }
 
-void operator delete[](void *ptr, unsigned long) {
+void operator delete[](void *ptr, __SIZE_TYPE__) {
     ::operator delete(ptr);
 }
 
 #ifndef __arm__
-void* operator new(unsigned long len) {
+void* operator new(__SIZE_TYPE__ len) {
     return (void *)kmalloc(len);
 }
 
@@ -83,13 +83,13 @@ void operator delete[](void *ptr) {
     ::operator delete(ptr);
 }
 
-void* operator new[](unsigned long len) {
+void* operator new[](__SIZE_TYPE__ len) {
     return ::operator new(len);
 }
 
 #else
 
-void* operator new(unsigned long len) {
+void* operator new(__SIZE_TYPE__ len) {
     return (void*)kmalloc(len);
 }
 
@@ -97,7 +97,7 @@ void operator delete[](void *ptr) {
     ::operator delete(ptr);
 }
 
-void* operator new[](unsigned long len) {
+void* operator new[](__SIZE_TYPE__ len) {
     return ::operator new(len);
 }
 #endif
