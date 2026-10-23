@@ -72,6 +72,7 @@ public:
     void switch_page_directory(struct page_directory *pd);
     u32 alloc_frame();
     void free_frame(u32 frame_addr);
+    bool verify_page_tables();
     struct page_table_entry *get_page_table(struct page_directory *pd, u32 virtual_addr, int create);
     
     int add_swapped_page(struct page_directory *pd, u32 virtual_addr, u32 swap_entry);
@@ -83,7 +84,7 @@ public:
     u32 frames_used;
     
 private:
-    struct page_frame *free_frames;
+    u32 alloc_frames(u32 count);
     u32 *frame_bitmap;
 };
 

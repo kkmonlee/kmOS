@@ -33,5 +33,6 @@ SECTIONS{
         *(COMMON)
         *(.bss)
         ebss = .;
+        kernel_end = ALIGN(0x1000);
     }
 }
