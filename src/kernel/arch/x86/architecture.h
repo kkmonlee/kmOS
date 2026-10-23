@@ -4,6 +4,8 @@
 #include <runtime/types.h>
 #include <process.h>
 
+struct multiboot_info;
+
 struct InterruptFrame
 {
   u32 gs;
@@ -28,7 +30,7 @@ struct InterruptFrame
 class Architecture
 {
 public:
-  void init();
+  void init(const multiboot_info *boot);
   void reboot();
   void shutdown();
   char *detect();

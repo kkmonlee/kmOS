@@ -3,36 +3,70 @@
 
 #include <runtime/types.h>
 
-struct multiboot_info
-{
-  u32 flags;
-  u32 low_mem;
-  u32 high_mem;
-  u32 boot_device;
-  u32 cmdline;
-  u32 mods_count;
-  u32 mods_addr;
-  struct
-  {
-    u32 num;
-    u32 size;
-    u32 addr;
-    u32 shndx;
-  } elf_sec;
-  unsigned long mmap_length;
-  unsigned long mmap_addr;
-  unsigned long drives_length;
-  unsigned long drives_addr;
-  unsigned long config_table;
-  unsigned long boot_loader_name;
-  unsigned long apm_table;
-  unsigned long vbe_control_info;
-  unsigned long vbe_mode_info;
-  unsigned long vbe_mode;
-  unsigned long vbe_interface_seg;
-  unsigned long vbe_interface_off;
-  unsigned long vbe_interface_len;
+#define MULTIBOOT_MAGIC 0x2BADB002
+
+struct multiboot_info {
+    u32 flags;
+    u32 low_mem;
+    u32 high_mem;
+    u32 boot_device;
+    u32 cmdline;
+    u32 mods_count;
+    u32 mods_addr;
+    struct { u32 num, size, addr, shndx; } elf_sec;
+    u32 mmap_length;
+    u32 mmap_addr;
+    u32 drives_length;
+    u32 drives_addr;
+    u32 config_table;
+    u32 boot_loader_name;
+    u32 apm_table;
+    u32 vbe_control_info;
+    u32 vbe_mode_info;
+    u16 vbe_mode;
+    u16 vbe_interface_seg;
+    u16 vbe_interface_off;
+    u16 vbe_interface_len;
+} __attribute__((packed));
+
+struct multiboot_module {
+    u32 start, end, string, reserved;
 };
+
+struct multiboot_mmap_entry {
+    u32 size;
+    u64 address;
+    u64 length;
+    u32 type;
+} __attribute__((packed));
+
+class MultibootMemoryMap {
+public:
+    MultibootMemoryMap(const void *data, u32 length)
+        : cursor_((const u8 *)data), remaining_(length), valid_(data != nullptr || !length) {}
+
+    bool next(multiboot_mmap_entry &entry) {
+        if (!valid_ || !remaining_) return false;
+        if (remaining_ < sizeof(u32)) return valid_ = false;
+        const multiboot_mmap_entry *raw = (const multiboot_mmap_entry *)cursor_;
+        if (raw->size < 20 || raw->size > remaining_ - sizeof(u32)) return valid_ = false;
+        entry = *raw;
+        u32 bytes = raw->size + sizeof(u32);
+        cursor_ += bytes;
+        remaining_ -= bytes;
+        return true;
+    }
+
+    bool valid() const { return valid_; }
+
+private:
+    const u8 *cursor_;
+    u32 remaining_;
+    bool valid_;
+};
+
+static_assert(__builtin_offsetof(multiboot_info, mmap_length) == 44, "Multiboot layout");
+static_assert(sizeof(multiboot_info) == 88, "Multiboot size");
 
 /* VBE controller information.  */
 struct vbe_controller

@@ -7,6 +7,8 @@
 #include <runtime/slub.h>
 #include <runtime/unified_alloc.h>
 #include <cow.h>
+#include <physical_memory.h>
+#include <core/boot.h>
 
 VMM vmm;
 struct page_directory *kernel_directory = 0;
@@ -14,9 +16,7 @@ struct page_directory *current_directory = 0;
 
 extern "C" char kernel_end;
 #define FRAME_SIZE 4096
-#define MAX_FRAMES 0x100000
-
-static u32 static_frame_bitmap[MAX_FRAMES / 32];
+static PhysicalMemory physical_memory;
 
 static_assert(sizeof(page_directory_entry) == 4, "PDE size");
 static_assert(sizeof(page_table_entry) == 4, "PTE size");
@@ -42,26 +42,15 @@ static void serial_print_vmm(const char* str) {
     }
 }
 
-void VMM::init() {
+void VMM::init(const multiboot_info *boot) {
     serial_print_vmm("[VMM] Starting VMM initialization\n");
     io.print("[VMM] Initializing virtual memory manager\n");
     
-    frame_bitmap = static_frame_bitmap;
-    serial_print_vmm("[VMM] Frame bitmap assigned\n");
-    
-    for (int i = 0; i < MAX_FRAMES / 32; i++) {
-        frame_bitmap[i] = 0;
+    if (!init_physical_memory(boot)) {
+        serial_print_vmm("[PANIC] Invalid or insufficient boot memory\n");
+        for (;;) asm volatile("cli; hlt");
     }
-    
-    frame_count = 64 * 1024 * 1024 / FRAME_SIZE;
-    frames_used = 0;
-    u32 reserved_end = ((u32)&kernel_end + FRAME_SIZE - 1) / FRAME_SIZE;
-    for (u32 i = 0; i < frame_count; ++i) {
-        if (i < reserved_end || (i >= 4096 && i < 8192)) {
-            frame_bitmap[i / 32] |= 1U << (i % 32);
-            ++frames_used;
-        }
-    }
+    serial_print_vmm("[VMM] Memory map verified\n");
 
     kernel_directory = create_page_directory();
     if (!kernel_directory) {
@@ -81,12 +70,12 @@ void VMM::init() {
     }
     serial_print_vmm("[VMM] Page tables verified\n");
 
-    init_buddy_allocator();
+    init_buddy_allocator((void *)heap_start, heap_size);
     init_slab_allocator();
     init_slob_allocator();
     init_slub_allocator();
-    init_stack_allocator();
     init_unified_allocator(SYS_MODE_DESKTOP);
+    init_stack_allocator();
     init_cow_manager();
     
     io.print("[VMM] Page tables ready with %d frames available\n", frame_count - frames_used);
@@ -102,24 +91,15 @@ struct page_directory *VMM::create_page_directory() {
     return pd;
 }
 
+void VMM::update_frame_counts() {
+    frame_count = physical_memory.frame_count();
+    frames_used = frame_count - physical_memory.free_pages();
+}
+
 u32 VMM::alloc_frames(u32 count) {
-    if (count == 0 || count > frame_count) return 0;
-    u32 run = 0;
-    for (u32 i = 0; i < frame_count; ++i) {
-        if (frame_bitmap[i / 32] & (1U << (i % 32))) {
-            run = 0;
-            continue;
-        }
-        if (++run == count) {
-            u32 first = i + 1 - count;
-            for (u32 j = first; j <= i; ++j) {
-                frame_bitmap[j / 32] |= 1U << (j % 32);
-            }
-            frames_used += count;
-            return first * FRAME_SIZE;
-        }
-    }
-    return 0;
+    u32 address = physical_memory.allocate(count);
+    update_frame_counts();
+    return address;
 }
 
 u32 VMM::alloc_frame() {
@@ -127,14 +107,66 @@ u32 VMM::alloc_frame() {
 }
 
 void VMM::free_frame(u32 address) {
-    if (address % FRAME_SIZE || address / FRAME_SIZE >= frame_count) return;
-    if (address < (u32)&kernel_end || (address >= 0x1000000 && address < 0x2000000)) return;
-    u32 index = address / FRAME_SIZE;
-    u32 mask = 1U << (index % 32);
-    if (frame_bitmap[index / 32] & mask) {
-        frame_bitmap[index / 32] &= ~mask;
-        --frames_used;
+    physical_memory.release(address);
+    update_frame_counts();
+}
+
+bool VMM::init_physical_memory(const multiboot_info *boot) {
+    if (!boot || (u32)boot > PhysicalMemory::LIMIT - sizeof(*boot)) return false;
+    physical_memory.reset();
+    if (boot->flags & (1U << 6)) {
+        if (!boot->mmap_length || !boot->mmap_addr ||
+            boot->mmap_addr >= PhysicalMemory::LIMIT ||
+            boot->mmap_length > PhysicalMemory::LIMIT - boot->mmap_addr) return false;
+        for (u32 pass = 0; pass < 2; ++pass) {
+            MultibootMemoryMap map((const void *)boot->mmap_addr, boot->mmap_length);
+            multiboot_mmap_entry entry;
+            while (map.next(entry)) {
+                if (pass == 0 && entry.type == 1) physical_memory.add_usable(entry.address, entry.length);
+                if (pass == 1 && entry.type != 1) physical_memory.reserve(entry.address, entry.length);
+            }
+            if (!map.valid()) return false;
+        }
+        physical_memory.reserve(boot->mmap_addr, boot->mmap_length);
+    } else if (boot->flags & 1U) {
+        physical_memory.add_usable(0x100000, (u64)boot->high_mem * 1024);
+    } else {
+        return false;
     }
+    physical_memory.reserve(0, (u32)&kernel_end);
+    physical_memory.reserve((u32)boot, sizeof(*boot));
+    if (boot->flags & (1U << 2)) physical_memory.reserve(boot->cmdline, 4096);
+    if (boot->flags & (1U << 9)) physical_memory.reserve(boot->boot_loader_name, 4096);
+    if (boot->flags & (1U << 3)) {
+        if ((boot->mods_count && !boot->mods_addr) || boot->mods_addr >= PhysicalMemory::LIMIT ||
+            boot->mods_count > (PhysicalMemory::LIMIT - boot->mods_addr) / sizeof(multiboot_module)) return false;
+        const multiboot_module *modules = (const multiboot_module *)boot->mods_addr;
+        physical_memory.reserve(boot->mods_addr, (u64)boot->mods_count * sizeof(*modules));
+        for (u32 i = 0; i < boot->mods_count; ++i) {
+            if (modules[i].end < modules[i].start) return false;
+            physical_memory.reserve(modules[i].start, modules[i].end - modules[i].start);
+            if (modules[i].string) physical_memory.reserve(modules[i].string, 4096);
+        }
+    }
+    if (boot->flags & (1U << 5)) {
+        physical_memory.reserve(boot->elf_sec.addr, (u64)boot->elf_sec.num * boot->elf_sec.size);
+    }
+    if (boot->flags & (1U << 4)) {
+        physical_memory.reserve(boot->elf_sec.addr, (u64)boot->elf_sec.num + boot->elf_sec.size);
+    }
+    if (boot->flags & (1U << 7)) physical_memory.reserve(boot->drives_addr, boot->drives_length);
+    if (boot->flags & (1U << 10)) physical_memory.reserve(boot->apm_table, 20);
+    if (boot->flags & (1U << 11)) {
+        physical_memory.reserve(boot->vbe_control_info, 512);
+        physical_memory.reserve(boot->vbe_mode_info, 256);
+    }
+    u32 heap_pages = physical_memory.free_pages() / 4;
+    if (heap_pages > 4096) heap_pages = 4096;
+    if (heap_pages < 512) heap_pages = 512;
+    heap_start = physical_memory.take_heap(heap_pages);
+    heap_size = heap_pages * FRAME_SIZE;
+    update_frame_counts();
+    return heap_start && physical_memory.free_pages() >= 64;
 }
 
 page_table_entry *VMM::get_page_table(page_directory *pd, u32 address, int create) {
@@ -316,9 +348,7 @@ int VMM::try_reclaim_memory(u32 pages_needed) {
     return swap_manager.reclaim_pages(pages_needed);
 }
 
-void init_vmm() {
-    vmm.init();
-}
+
 
 char *get_page_frame() {
     u32 frame = vmm.alloc_frame();

@@ -60,9 +60,11 @@ struct page_frame {
 };
 
 
+struct multiboot_info;
+
 class VMM {
 public:
-    void init();
+    void init(const multiboot_info *boot);
     struct page_directory *create_page_directory();
     void destroy_page_directory(struct page_directory *pd);
     int map_page(struct page_directory *pd, u32 virtual_addr, u32 physical_addr, u32 flags);
@@ -73,6 +75,8 @@ public:
     u32 alloc_frame();
     void free_frame(u32 frame_addr);
     bool verify_page_tables();
+    u32 heap_start;
+    u32 heap_size;
     struct page_table_entry *get_page_table(struct page_directory *pd, u32 virtual_addr, int create);
     
     int add_swapped_page(struct page_directory *pd, u32 virtual_addr, u32 swap_entry);
@@ -85,7 +89,8 @@ public:
     
 private:
     u32 alloc_frames(u32 count);
-    u32 *frame_bitmap;
+    bool init_physical_memory(const multiboot_info *boot);
+    void update_frame_counts();
 };
 
 extern VMM vmm;

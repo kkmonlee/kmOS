@@ -62,7 +62,8 @@ u32 BuddyAllocator::get_order(u32 size) {
 void *BuddyAllocator::alloc(u32 size) {
     if (size == 0) return nullptr;
     
-    u32 order = get_order(size);
+    if (size > (MIN_BLOCK_SIZE << MAX_ORDER) - sizeof(buddy_block)) return nullptr;
+    u32 order = get_order(size + sizeof(buddy_block));
     return alloc_order(order);
 }
 
@@ -213,8 +214,8 @@ void BuddyAllocator::print_stats() {
     }
 }
 
-void init_buddy_allocator() {
-    buddy_allocator.init((void*)0x1000000, 0x1000000);
+void init_buddy_allocator(void *start, u32 size) {
+    buddy_allocator.init(start, size);
 }
 
 extern "C" {

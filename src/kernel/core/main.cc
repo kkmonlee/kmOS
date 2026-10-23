@@ -10,6 +10,7 @@
 #include <core/shell.h>
 #include <core/ext2.h>
 #include <core/process.h>
+#include <core/boot.h>
 
 Architecture arch;
 IO io;
@@ -38,7 +39,7 @@ static void serial_print(const char* str) {
     }
 }
 
-extern "C" void kmain()
+extern "C" void kmain(u32 magic, const multiboot_info *boot)
 {
     init_serial();
     serial_print("KMAIN: Serial port initialized\n");
@@ -65,7 +66,11 @@ extern "C" void kmain()
     
     serial_print("KMAIN: About to call arch.init()\n");
     
-    arch.init();
+    if (magic != MULTIBOOT_MAGIC || !boot) {
+        serial_print("[PANIC] Invalid Multiboot information\n");
+        for (;;) asm volatile("cli; hlt");
+    }
+    arch.init(boot);
     
     Process *kernel_process = new Process(const_cast<char*>("kernel_main"));
     kernel_process->setPParent(nullptr);

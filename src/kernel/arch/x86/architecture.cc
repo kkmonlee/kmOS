@@ -36,13 +36,13 @@ static void idle_thread()
     }
 }
 
-void Architecture::init()
+void Architecture::init(const multiboot_info *boot)
 {
     serial_print("[ARCH] Starting x86 architecture initialization\n");
     io.print("[ARCH] Initializing x86 architecture\n");
 
     serial_print("[ARCH] About to initialize VMM\n");
-    vmm.init();
+    vmm.init(boot);
 
     plist = nullptr;
     pcurrent = nullptr;

@@ -48,7 +48,7 @@ private:
 extern BuddyAllocator buddy_allocator;
 
 extern "C" {
-    void init_buddy_allocator();
+    void init_buddy_allocator(void *start, u32 size);
     void *buddy_alloc(u32 size);
     void buddy_free(void *ptr);
 }

@@ -68,7 +68,7 @@ struct slab_cache *SlabAllocator::cache_create(const char *name, u32 size, u32 a
         slab_size *= 2;
     }
     
-    cache->gfp_order = buddy_allocator.get_order(slab_size);
+    cache->gfp_order = buddy_allocator.get_order(slab_size + sizeof(buddy_block));
     cache->num_objs_per_slab = calculate_num_objs(cache->obj_size, slab_size);
     
     cache->slabs_full = nullptr;

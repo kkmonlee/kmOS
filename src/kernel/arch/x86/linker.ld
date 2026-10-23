@@ -1,38 +1,28 @@
 OUTPUT_FORMAT(elf32-i386)
 OUTPUT_ARCH(i386)
-ENTRY (_start)
+ENTRY(_start)
 
-SECTIONS{
+SECTIONS {
     . = 0x00100000;
-
-    .text :{
-        *(.text)
+    kernel_start = .;
+    .multiboot : { KEEP(*(.multiboot)) }
+    .text ALIGN(0x1000) : { *(.text .text.*) }
+    .rodata ALIGN(0x1000) : { *(.rodata .rodata.*) }
+    .data ALIGN(0x1000) : {
+        start_ctors = .;
+        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))
+        KEEP(*(.init_array))
+        KEEP(*(.ctors))
+        end_ctors = .;
+        *(.data .data.*)
     }
-
-	.data ALIGN (0x1000) : {
-	   start_ctors = .;
-	   *(.ctor*)
-	   end_ctors = .;
-	   start_dtors = .;
-	   *(.dtor*)
-	   end_dtors = .;
-	   *(.data)
-	}
-
-
-    .rodata ALIGN (0x1000) : {
-        *(.rodata)
-    }
-
-    .data ALIGN (0x1000) : {
-        *(.data)
-    }
-
-    .bss : {
+    .tbss : { *(.tbss .tbss.*) }
+    .bss ALIGN(0x1000) : {
         sbss = .;
         *(COMMON)
-        *(.bss)
+        *(.bss .bss.*)
         ebss = .;
-        kernel_end = ALIGN(0x1000);
     }
+    kernel_end = ALIGN(0x1000);
+    /DISCARD/ : { *(.eh_frame*) *(.comment) }
 }
