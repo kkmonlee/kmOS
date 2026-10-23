@@ -12,6 +12,7 @@ public:
     void reset() {
         count_ = 0;
         free_ = 0;
+        next_ = 1;
         for (u32 i = 0; i < MAX_FRAMES / 32; ++i) {
             used_[i] = ~0U;
             usable_[i] = 0;
@@ -30,6 +31,7 @@ public:
                 usable_[i / 32] |= mask;
                 used_[i / 32] &= ~mask;
                 ++free_;
+                if (i && i < next_) next_ = i;
             }
         }
     }
@@ -49,13 +51,17 @@ public:
     u32 allocate(u32 pages = 1) {
         if (!pages || pages > free_) return 0;
         u32 run = 0;
-        for (u32 i = 1; i < count_; ++i) {
+        u32 first_free = count_;
+        for (u32 i = next_; i < count_; ++i) {
             if (used_[i / 32] & (1U << (i % 32))) {
                 run = 0;
-            } else if (++run == pages) {
+            } else {
+                if (first_free == count_) first_free = i;
+                if (++run != pages) continue;
                 u32 first = i + 1 - pages;
                 for (u32 j = first; j <= i; ++j) used_[j / 32] |= 1U << (j % 32);
                 free_ -= pages;
+                next_ = first_free == first ? i + 1 : first_free;
                 return first * FRAME_BYTES;
             }
         }
@@ -69,6 +75,7 @@ public:
         if (used_[index / 32] & mask) {
             used_[index / 32] &= ~mask;
             ++free_;
+            if (index < next_) next_ = index;
         }
     }
 
@@ -92,6 +99,7 @@ private:
     u32 usable_[MAX_FRAMES / 32];
     u32 count_;
     u32 free_;
+    u32 next_;
 };
 
 #endif

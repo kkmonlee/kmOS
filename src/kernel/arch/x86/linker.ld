@@ -6,8 +6,8 @@ SECTIONS {
     . = 0x00100000;
     kernel_start = .;
     .multiboot : { KEEP(*(.multiboot)) }
-    .text ALIGN(0x1000) : { *(.text .text.*) }
-    .rodata ALIGN(0x1000) : { *(.rodata .rodata.*) }
+    .text ALIGN(0x1000) : { text_start = .; *(.text .text.*) text_end = .; }
+    .rodata ALIGN(0x1000) : { rodata_start = .; *(.rodata .rodata.*) rodata_end = .; }
     .data ALIGN(0x1000) : {
         start_ctors = .;
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))

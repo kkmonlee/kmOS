@@ -1,5 +1,6 @@
 #include <os.h>
 #include <io.h>
+#include <serial.h>
 
 typedef char* va_list;
 #define va_start(ap, last) (ap = (va_list)&last + sizeof(last))
@@ -11,7 +12,7 @@ extern "C" {
     void *memset(void *s, int c, int n);
     int strlen(char *s);
     char *strncpy(char *destString, const char *sourceString, int maxLength);
-    char *itoa(char *str, int num, int base);
+    void itoa(char *str, unsigned long num, int base);
 }
 
 extern IO io;
@@ -121,6 +122,10 @@ void IO::switchtty() {
 }
 
 void IO::putc(char c) {
+    if (real_screen == (char *)RAMSCREEN) {
+        char text[2] = {c, 0};
+        serial::write(text);
+    }
     kattr = 0x07;
     unsigned char *video;
     video = (unsigned char *) (real_screen + 2 * x + 160 * yl);
@@ -128,8 +133,7 @@ void IO::putc(char c) {
         x = 0;
         yl++;
     } else if (c == 8) {
-        if (x) *(video + 1) = 0x0;
-        x--;
+        if (x) { *(video + 1) = 0x0; --x; }
     } else if (c == 9) {
         x = x + 8 - (x % 8);
     } else if (c == 13) {
@@ -186,10 +190,12 @@ void IO::print(const char *s, ...) {
                 c = *s++;
             }
 
-            if (c == 'd') {
+            if (c == '%') {
+                putc('%');
+            } else if (c == 'd') {
                 ival = va_arg(ap, int);
                 if (ival < 0) {
-                    uival = 0 - ival;
+                    uival = 0U - (u32)ival;
                     neg++;
                 } else uival = ival;
                 itoa(buf, uival, 10);

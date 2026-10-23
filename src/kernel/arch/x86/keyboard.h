@@ -69,7 +69,7 @@ private:
     char input_buffer[KEYBOARD_BUFFER_SIZE];
     int buffer_head;
     int buffer_tail;
-    int buffer_count;
+    volatile int buffer_count;
     
     struct keyboard_state state;
     

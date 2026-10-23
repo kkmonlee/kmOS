@@ -41,6 +41,7 @@ Process::~Process()
 
 Process::Process(char *n) : File(n, TYPE_PROCESS)
 {
+  memset(&info, 0, sizeof(info));
   pid = proc_pid++;
   state = SLEEPING;
   pparent = 0;

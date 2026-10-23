@@ -26,7 +26,7 @@ void COWManager::init() {
 }
 
 int COWManager::handle_cow_fault(struct page_directory *pd, u32 virtual_addr, u32 error_code) {
-    if (!(error_code & 0x2)) {
+    if ((error_code & 0xb) != 3) {
         return -1;
     }
     
@@ -38,7 +38,8 @@ int COWManager::handle_cow_fault(struct page_directory *pd, u32 virtual_addr, u3
     }
     
     struct cow_page *cow_page = find_cow_page(physical_addr);
-    if (!cow_page || cow_page->ref_count <= 1) {
+    if (!cow_page) return -1;
+    if (cow_page->ref_count == 1) {
         struct page_table_entry *table = vmm.get_page_table(pd, page_addr, 0);
         if (table) {
             u32 page_idx = VADDR_PT_OFFSET(page_addr);

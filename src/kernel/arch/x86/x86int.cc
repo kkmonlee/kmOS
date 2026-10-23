@@ -5,6 +5,9 @@
 extern "C" void test_gp();
 extern "C" char test_gp_fault, test_gp_resume;
 static volatile u32 testing_exception;
+static volatile u32 page_fault_count;
+
+extern "C" u32 get_page_fault_count() { return page_fault_count; }
 
 extern "C" void exception_handler(regs_t *frame) {
     if (testing_exception == 3 && frame->which_int == 3 && frame->err_code == 0 &&
@@ -22,6 +25,7 @@ extern "C" void exception_handler(regs_t *frame) {
     }
     u32 address = 0;
     if (frame->which_int == 14) {
+        ++page_fault_count;
         asm volatile("mov %%cr2, %0" : "=r"(address));
         if (vmm.handle_page_fault(address, frame->err_code) == 0) return;
     }

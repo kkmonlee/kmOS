@@ -14,7 +14,7 @@ VMM vmm;
 struct page_directory *kernel_directory = 0;
 struct page_directory *current_directory = 0;
 
-extern "C" char kernel_end;
+extern "C" char kernel_end, text_start, text_end, rodata_start, rodata_end;
 #define FRAME_SIZE 4096
 static PhysicalMemory physical_memory;
 
@@ -57,18 +57,31 @@ void VMM::init(const multiboot_info *boot) {
         serial_print_vmm("[PANIC] No memory for page directory\n");
         for (;;) asm volatile("cli; hlt");
     }
-    for (u32 address = 0; address < frame_count * FRAME_SIZE; address += FRAME_SIZE) {
+    for (u32 address = FRAME_SIZE; address < frame_count * FRAME_SIZE; address += FRAME_SIZE) {
         if (map_page(kernel_directory, address, address, PG_PRESENT | PG_WRITE) != 0) {
             serial_print_vmm("[PANIC] No memory for page table\n");
             for (;;) asm volatile("cli; hlt");
         }
     }
+    for (u32 address = KERN_HEAP; address < KERN_HEAP_LIM; address += 0x400000) {
+        if (!get_page_table(kernel_directory, address, 1)) {
+            serial_print_vmm("[PANIC] No memory for heap page table\n");
+            for (;;) asm volatile("cli; hlt");
+        }
+    }
+    for (u32 address = (u32)&text_start; address < (u32)&text_end; address += FRAME_SIZE)
+        map_page(kernel_directory, address, address, PG_PRESENT);
+    for (u32 address = (u32)&rodata_start; address < (u32)&rodata_end; address += FRAME_SIZE)
+        map_page(kernel_directory, address, address, PG_PRESENT);
     switch_page_directory(kernel_directory);
     if (!verify_page_tables()) {
         serial_print_vmm("[PANIC] Page table verification failed\n");
         for (;;) asm volatile("cli; hlt");
     }
     serial_print_vmm("[VMM] Page tables verified\n");
+
+    enable_paging();
+    serial_print_vmm("[VMM] Paging enabled\n");
 
     init_buddy_allocator((void *)heap_start, heap_size);
     init_slab_allocator();
@@ -88,6 +101,14 @@ struct page_directory *VMM::create_page_directory() {
     zero_memory((void *)address, pages * FRAME_SIZE);
     page_directory *pd = (page_directory *)address;
     pd->physical_address = address;
+    if (kernel_directory) {
+        for (u32 i = 0; i < 1024; ++i) {
+            if (i < VADDR_PD_OFFSET(USER_OFFSET) || i >= VADDR_PD_OFFSET(USER_STACK)) {
+                pd->tables[i] = kernel_directory->tables[i];
+                pd->page_tables[i] = kernel_directory->page_tables[i];
+            }
+        }
+    }
     return pd;
 }
 
@@ -191,6 +212,7 @@ page_table_entry *VMM::get_page_table(page_directory *pd, u32 address, int creat
 
 int VMM::map_page(page_directory *pd, u32 address, u32 physical, u32 flags) {
     if ((address | physical) & (FRAME_SIZE - 1)) return -1;
+    if ((flags & PG_USER) && (address < USER_OFFSET || address >= USER_STACK)) return -1;
     page_table_entry *table = get_page_table(pd, address, 1);
     if (!table) return -1;
     u32 index = VADDR_PT_OFFSET(address);
@@ -241,43 +263,30 @@ bool VMM::verify_page_tables() {
 }
 
 int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
+    if (!current_directory || (error_code & 8)) return -1;
     u32 page_addr = fault_addr & ~0xFFF;
-    
+    if (error_code & 1) {
+        if ((error_code & 2) && fault_addr >= USER_OFFSET && fault_addr < USER_STACK)
+            return cow_handle_page_fault(fault_addr, error_code);
+        return -1;
+    }
+    if (error_code & (4 | 16)) return -1;
     u32 swap_entry = get_swap_entry(current_directory, page_addr);
-    if (swap_entry != 0) {
-        if (swap_manager.swap_in_page(page_addr, swap_entry) == 0) {
-            remove_swapped_page(current_directory, page_addr);
-            swap_manager.update_page_access(page_addr);
-            return 0;
-        }
+    if (swap_entry && swap_manager.swap_in_page(page_addr, swap_entry) == 0) {
+        remove_swapped_page(current_directory, page_addr);
+        swap_manager.update_page_access(page_addr);
+        return 0;
     }
-    
-    if (fault_addr >= USER_OFFSET && fault_addr < USER_STACK) {
-        int cow_result = cow_handle_page_fault(fault_addr, error_code);
-        if (cow_result == 0) {
-            swap_manager.update_page_access(page_addr);
-            return 0;
-        }
-    }
-    
     if (fault_addr >= KERN_HEAP && fault_addr < KERN_HEAP_LIM) {
         u32 frame = alloc_frame();
-        if (frame == 0) {
-            io.print("[VMM] Page fault: Out of memory for kernel heap\n");
-            return -1;
-        }
-        
+        if (!frame) return -1;
+        zero_memory((void *)frame, FRAME_SIZE);
         if (map_page(current_directory, page_addr, frame, PG_PRESENT | PG_WRITE) != 0) {
-            io.print("[VMM] Page fault: Failed to map page\n");
             free_frame(frame);
             return -1;
         }
-        
-        swap_manager.add_to_lru(page_addr);
         return 0;
     }
-    
-    io.print("[VMM] Page fault at %x, error %x\n", fault_addr, error_code);
     return -1;
 }
 
@@ -290,6 +299,7 @@ void VMM::destroy_page_directory(page_directory *pd) {
     if (!pd || pd == kernel_directory || pd == current_directory) return;
     for (u32 i = 0; i < 1024; ++i) {
         if (!pd->tables[i].present || !pd->page_tables[i]) continue;
+        if (kernel_directory && pd->page_tables[i] == kernel_directory->page_tables[i]) continue;
         for (u32 j = 0; j < 1024; ++j) {
             if (pd->page_tables[i][j].present && pd->page_tables[i][j].user) {
                 free_frame(pd->page_tables[i][j].frame << 12);
@@ -375,8 +385,8 @@ void pd_add_page(char *v_addr, char *p_addr, u32 flags, struct page_directory *p
 void enable_paging() {
     u32 cr0;
     asm volatile("mov %%cr0, %0" : "=r"(cr0));
-    cr0 |= PAGING_FLAG;
-    asm volatile("mov %0, %%cr0" :: "r"(cr0));
+    cr0 |= PAGING_FLAG | 0x00010000;
+    asm volatile("mov %0, %%cr0" :: "r"(cr0) : "memory");
 }
 
 void switch_page_directory_asm(u32 physical_addr) {

@@ -3,7 +3,7 @@
 #include <runtime/buddy.h>
 
 extern "C" {
-    char *itoa(int value, char *str, int base);
+    void itoa(char *str, unsigned long value, int base);
     int strcpy(char *dst, const char *src);
 }
 
@@ -25,7 +25,7 @@ void SLUBAllocator::init() {
     
     for (int i = 0; i < 16; i++) {
         char cache_name[32];
-        itoa(cache_sizes[i], cache_name + 5, 10);
+        itoa(cache_name + 5, cache_sizes[i], 10);
         cache_name[0] = 's'; cache_name[1] = 'l'; cache_name[2] = 'u'; 
         cache_name[3] = 'b'; cache_name[4] = '-';
         size_caches[i] = cache_create(cache_name, cache_sizes[i], SLUB_ALIGN, 

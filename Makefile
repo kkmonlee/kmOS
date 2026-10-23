@@ -1,34 +1,46 @@
-SRCDIR = ./src
+CROSS ?= i686-elf
+QEMU ?= qemu-system-i386
+RAM ?= 64M
+KERNEL = src/kernel/kernel.elf
+export CROSS
 
-.PHONY: all build run debug clean help iso
+.PHONY: all build run debug test iso test-iso clean check-tools help
 
-all:
-	$(MAKE) -C $(SRCDIR) all
+all: check-tools
+	$(MAKE) -C src/kernel
 
-build:
-	$(MAKE) -C $(SRCDIR) build
+build: all
 
-run:
-	$(MAKE) -C $(SRCDIR) run
+check-tools:
+	@for tool in $(CROSS)-g++ $(CROSS)-ld nasm; do \
+		command -v $$tool >/dev/null || { echo "Missing $$tool. See README.md." >&2; exit 1; }; \
+	done
 
-debug:
-	$(MAKE) -C $(SRCDIR) debug
+run: all
+	$(QEMU) -kernel $(KERNEL) -m $(RAM) -serial stdio -no-reboot
 
-iso:
-	@echo "Building bootable ISO image..."
-	@./scripts/build-iso.sh
+debug: all
+	$(QEMU) -kernel $(KERNEL) -m $(RAM) -display none -serial mon:stdio -no-reboot
+
+test: all
+	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
+	$(CXX) -std=c++17 -fno-builtin -I src/kernel integration_tests/physical_memory_test.cc -o "$$test_dir/memory"; \
+	"$$test_dir/memory"
+	python3 integration_tests/boot_test.py --qemu $(QEMU) --kernel $(KERNEL)
+
+iso: all
+	./scripts/build-iso.sh
+
+test-iso: iso
+	python3 integration_tests/boot_test.py --qemu $(QEMU) --iso kmos.iso
 
 clean:
-	$(MAKE) -C $(SRCDIR) clean
-	@rm -f kmos.iso
-	@rm -rf iso
-	@echo "Cleaned ISO artifacts"
+	$(MAKE) -C src/kernel clean
+	rm -f src/sdk/bootdisk/kernel.elf iso/boot/kernel.elf kmos.iso
 
 help:
-	$(MAKE) -C $(SRCDIR) help
-	@echo ""
-	@echo "ISO Targets:"
-	@echo "  make iso       Build bootable ISO image (kmos.iso)"
-	@echo ""
-	@echo "ISO can be tested with:"
-	@echo "  qemu-system-i386 -cdrom kmos.iso -m 64M"
+	@echo "make           build kernel"
+	@echo "make run       boot in QEMU"
+	@echo "make debug     boot in terminal (Ctrl-a x to quit)"
+	@echo "make test      run memory and QEMU tests"
+	@echo "make test-iso  build and boot a GRUB ISO"

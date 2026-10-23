@@ -25,13 +25,6 @@ extern "C" {
 extern IO io;
 extern Keyboard keyboard;
 
-static void serial_print_shell(const char* str) {
-    while (*str) {
-        asm volatile("outb %0, %1" : : "a"(*str), "Nd"((unsigned short)0x3F8));
-        str++;
-    }
-}
-
 Shell shell;
 
 static struct shell_command builtin_commands[] = {
@@ -55,30 +48,22 @@ static struct shell_command builtin_commands[] = {
 };
 
 void Shell::init() {
-    serial_print_shell("[SHELL] Entering init()\n");
     io.print("[SHELL] Initializing shell\n");
     
-    serial_print_shell("[SHELL] About to strcpy\n");
     strcpy(state.current_directory, "/");
-    serial_print_shell("[SHELL] strcpy done\n");
     memset(state.command_buffer, 0, MAX_COMMAND_LENGTH);
-    serial_print_shell("[SHELL] memset done\n");
     state.history_count = 0;
     state.history_index = 0;
     state.running = false;
     state.exit_code = 0;
     
-    serial_print_shell("[SHELL] About to init history\n");
     for (int i = 0; i < MAX_HISTORY; i++) {
         state.command_history[i] = nullptr;
     }
     
-    serial_print_shell("[SHELL] About to init_commands\n");
     init_commands();
-    serial_print_shell("[SHELL] init_commands done\n");
     
     io.print("[SHELL] Shell initialized\n");
-    serial_print_shell("[SHELL] Exiting init()\n");
 }
 
 void Shell::init_commands() {
@@ -105,23 +90,17 @@ void Shell::init_commands() {
 }
 
 void Shell::run() {
-    serial_print_shell("[SHELL] run() called\n");
     
     print_banner();
-    serial_print_shell("[SHELL] print_banner() returned\n");
     
     state.running = true;
     
-    serial_print_shell("[SHELL] Entering main loop\n");
     
     while (state.running) {
-        serial_print_shell("[SHELL] Loop iteration start\n");
         
         print_prompt();
-        serial_print_shell("[SHELL] Prompt printed, waiting for input\n");
         
         int len = keyboard.read_line(state.command_buffer, MAX_COMMAND_LENGTH);
-        serial_print_shell("[SHELL] keyboard.read_line returned\n");
         
         if (len > 0) {
             char* args[MAX_ARGS];
@@ -138,22 +117,14 @@ void Shell::run() {
 }
 
 void Shell::print_banner() {
-    serial_print_shell("[SHELL] print_banner() - clearing screen\n");
     clear_screen();
-    serial_print_shell("[SHELL] print_banner() - screen cleared\n");
-    io.print("╔════════════════════════════════════════════════════════════════════════════════╗\n");
-    io.print("║                                    kmOS Shell                                  ║\n");
-    io.print("║                              Welcome to kmOS v1.0                              ║\n");
-    io.print("╚════════════════════════════════════════════════════════════════════════════════╝\n");
+    io.print("kmOS\n");
     io.print("\n");
     io.print("Type 'help' for a list of available commands.\n\n");
-    serial_print_shell("[SHELL] print_banner() - all prints done\n");
 }
 
 void Shell::print_prompt() {
-    serial_print_shell("[SHELL] print_prompt() called\n");
     io.print("kmOS:%s$ ", state.current_directory);
-    serial_print_shell("[SHELL] print_prompt() done\n");
 }
 
 int Shell::parse_command(const char* input, char** args) {
@@ -218,7 +189,7 @@ int Shell::cmd_help(int argc, char** argv) {
     
     io.print("Available commands:\n\n");
     for (int i = 0; i < command_count; i++) {
-        io.print("  %-10s - %s\n", commands[i].name, commands[i].description);
+        io.print("  %s - %s\n", commands[i].name, commands[i].description);
     }
     io.print("\n");
     return 0;
@@ -400,7 +371,7 @@ int Shell::cmd_ps(int argc, char** argv) {
         }
         
         u32 ppid = (p->getPParent() != nullptr) ? p->getPParent()->getPid() : 0;
-        io.print("%3d  %4d %-10s %s\n", p->getPid(), ppid, state_str, p->getName());
+        io.print("%d  %d %s %s\n", p->getPid(), ppid, state_str, p->getName());
         
         p = p->getPNext();
     } while (p != nullptr && p != start);

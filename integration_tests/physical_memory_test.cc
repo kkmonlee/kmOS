@@ -70,5 +70,11 @@ int main() {
     CHECK(!short_header.next(entry) && !short_header.valid());
     MultibootMemoryMap missing(nullptr, 24);
     CHECK(!missing.next(entry) && !missing.valid());
+    CHECK(boot_has_argument("kernel test=paging other", "test=paging"));
+    CHECK(boot_has_argument("\t test=paging\t", "test=paging"));
+    CHECK(!boot_has_argument("test=paging-more", "test=paging"));
+    CHECK(!boot_has_argument("prefix-test=paging", "test=paging"));
+    CHECK(!boot_has_argument("test=paging", "test=paging", 11));
+    CHECK(!boot_has_argument(nullptr, "test=paging"));
     puts("physical memory tests passed");
 }

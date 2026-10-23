@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := all
 
 ARCH=x86
 KERNEL=kernel.elf
@@ -18,8 +19,8 @@ PLATFORMS= `find ./arch/ -type d | sed "s/.*\///" | sort`
 
 all: $(KERNEL)
 
-$(KERNEL): $(OBJS)
-	$(LD) $(LDFLAG) -o $@ $^ 
+$(KERNEL): $(OBJS) arch/$(ARCH)/linker.ld
+	$(LD) $(LDFLAG) -o $@ $(OBJS)
 	@mkdir -p $(SDKDIR)/bootdisk/
 	cp $(KERNEL) $(SDKDIR)/bootdisk/
 	
@@ -69,7 +70,11 @@ arch/$(ARCH)/x86int_asm.o: arch/$(ARCH)/x86int.asm
 
 
 clean:
-	rm -f $(OBJS)  $(KERNEL) dasm.txt
+	rm -f $(OBJS) $(OBJS:.o=.d) $(KERNEL) dasm.txt
 	
 	
 
+
+-include $(OBJS:.o=.d)
+
+$(OBJS): arch/$(ARCH)/config.make

@@ -68,6 +68,19 @@ private:
 static_assert(__builtin_offsetof(multiboot_info, mmap_length) == 44, "Multiboot layout");
 static_assert(sizeof(multiboot_info) == 88, "Multiboot size");
 
+inline bool boot_has_argument(const char *text, const char *argument, u32 limit = 4096) {
+    if (!text || !argument || !*argument) return false;
+    for (u32 i = 0; i < limit && text[i];) {
+        if (text[i] == ' ' || text[i] == '\t') { ++i; continue; }
+        u32 j = 0;
+        while (i + j < limit && argument[j] && text[i + j] == argument[j]) ++j;
+        if (!argument[j] && i + j < limit &&
+            (!text[i + j] || text[i + j] == ' ' || text[i + j] == '\t')) return true;
+        while (i < limit && text[i] && text[i] != ' ' && text[i] != '\t') ++i;
+    }
+    return false;
+}
+
 /* VBE controller information.  */
 struct vbe_controller
 {

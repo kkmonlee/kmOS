@@ -149,11 +149,15 @@ char Keyboard::get_from_buffer() {
 }
 
 char Keyboard::get_char() {
-    return get_from_buffer();
+    u32 flags = irq_save();
+    char c = get_from_buffer();
+    irq_restore(flags);
+    if (!c && (io.inb(0x3FD) & 1)) c = io.inb(0x3F8);
+    return c;
 }
 
 bool Keyboard::char_available() {
-    return buffer_count > 0;
+    return buffer_count > 0 || (io.inb(0x3FD) & 1);
 }
 
 bool Keyboard::key_pressed(u8 scancode) {
@@ -203,9 +207,11 @@ int Keyboard::read_line(char* buffer, int max_len) {
 }
 
 void Keyboard::clear_buffer() {
+    u32 flags = irq_save();
     buffer_head = 0;
     buffer_tail = 0;
     buffer_count = 0;
+    irq_restore(flags);
 }
 
 extern "C" {
