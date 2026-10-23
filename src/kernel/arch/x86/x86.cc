@@ -17,13 +17,11 @@ extern "C" {
 extern "C"
 {
 
-  regs_t cpu_cpuid(int /*code*/)
+  regs_t cpu_cpuid(u32 code)
   {
-    regs_t r;
-    r.eax = 0;
-    r.ebx = 0x756E6547;
-    r.ecx = 0x6C65746E;
-    r.edx = 0x49656E69;
+    regs_t r = {};
+    asm volatile("cpuid" : "=a"(r.eax), "=b"(r.ebx), "=c"(r.ecx), "=d"(r.edx)
+                 : "a"(code), "c"(0));
     return r;
   }
 
@@ -42,7 +40,27 @@ extern "C"
     strcat(name, line3);
     strcat(name, line2);
 
-    return 15;
+    return 12;
+  }
+
+  void cpu_brand_name(char *name)
+  {
+    if (cpu_cpuid(0x80000000).eax < 0x80000004) {
+      cpu_vendor_name(name);
+      return;
+    }
+    for (u32 i = 0; i < 3; ++i) {
+      regs_t r = cpu_cpuid(0x80000002 + i);
+      u32 words[] = {r.eax, r.ebx, r.ecx, r.edx};
+      memcpy(name + i * 16, words, 16);
+    }
+    name[48] = 0;
+    u32 first = 0;
+    while (name[first] == ' ') ++first;
+    u32 length = 0;
+    while (name[first + length]) { name[length] = name[first + length]; ++length; }
+    while (length && name[length - 1] == ' ') --length;
+    name[length] = 0;
   }
 
   void schedule();

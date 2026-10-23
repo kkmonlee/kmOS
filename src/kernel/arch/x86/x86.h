@@ -143,6 +143,7 @@ extern "C"
     void switch_to_task(struct process_st *current, int mode);
     extern tss default_tss;
     u32 cpu_vendor_name(char *name);
+    void cpu_brand_name(char *name);
     int dequeue_signal(int);
     int handle_signal(int);
 }

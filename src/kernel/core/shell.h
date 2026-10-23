@@ -52,6 +52,8 @@ public:
     int cmd_swap(int argc, char** argv);
     int cmd_uptime(int argc, char** argv);
     int cmd_uname(int argc, char** argv);
+    int cmd_fetch(int argc, char** argv);
+    int cmd_lsb_release(int argc, char** argv);
     int cmd_exit(int argc, char** argv);
     
 

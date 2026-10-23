@@ -13,6 +13,7 @@ make test-iso  # needs GRUB + xorriso, or Docker/OrbStack
 ```
 
 No disk image or root access needed. `RAM=128M make run` to change RAM.
+Run `fetch` or `lsb_release -a` in the shell for system info.
 
 Paging is on. Only the first 1 GB of RAM is managed for now.
 The shell runs in kernel space. Userland and filesystems still need work.

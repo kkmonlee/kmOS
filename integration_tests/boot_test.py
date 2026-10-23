@@ -135,6 +135,16 @@ def boot(args, ram, machine="pc"):
             time.sleep(0.04)
         text = vm.wait(lambda text: text.count("kmOS:/$ ") > count)
         assert "\nkeyboardok\n" in text, text
+        for command in ("fetch", "lsb_release -a"):
+            start = len(vm.text())
+            info = vm.serial_command(command)[start:]
+            for field in ("kmOS 1.0", "Kernel: monolithic", "Arch: x86 (32-bit)",
+                          "CPU: ", "Memory: ", "Uptime: ", "Paging: on", "Built: "):
+                assert field in info, info
+            assert len(re.findall(r"^[ .+#]{32}", info, re.MULTILINE)) == 16, info
+            assert all(len(line) < 80 for line in info.splitlines()), info
+        start = len(vm.text())
+        assert "Usage: lsb_release" in vm.serial_command("lsb_release -x")[start:]
         for command in ("help", "mem", "ps", "uptime"):
             text = vm.serial_command(command)
         ticks = int(re.findall(r"Timer ticks: (\d+)", text)[-1])

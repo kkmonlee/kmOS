@@ -8,6 +8,8 @@
 #include <arch/x86/vmm.h>
 #include <arch/x86/swap.h>
 #include <runtime/alloc.h>
+#include <config.h>
+#include <core/logo.h>
 
 extern "C" {
     int strlen(const char *s);
@@ -44,7 +46,9 @@ static struct shell_command builtin_commands[] = {
     {"swap",    "Show swap information",                  nullptr},
     {"uptime",  "Show system uptime",                     nullptr},
     {"uname",   "Show system information",                nullptr},
-    {"exit",    "Exit the shell",                         nullptr}
+    {"exit",    "Exit the shell",                         nullptr},
+    {"fetch",   "Show logo and system info",              nullptr},
+    {"lsb_release", "Show OS release info",               nullptr}
 };
 
 void Shell::init() {
@@ -87,6 +91,8 @@ void Shell::init_commands() {
     commands[14].handler = [](int argc, char** argv) { return shell.cmd_uptime(argc, argv); };
     commands[15].handler = [](int argc, char** argv) { return shell.cmd_uname(argc, argv); };
     commands[16].handler = [](int argc, char** argv) { return shell.cmd_exit(argc, argv); };
+    commands[17].handler = [](int argc, char** argv) { return shell.cmd_fetch(argc, argv); };
+    commands[18].handler = [](int argc, char** argv) { return shell.cmd_lsb_release(argc, argv); };
 }
 
 void Shell::run() {
@@ -481,9 +487,52 @@ int Shell::cmd_uptime(int argc, char** argv) {
 
 int Shell::cmd_uname(int argc, char** argv) {
     (void)argc; (void)argv;
-    io.print("kmOS 1.0 x86 kernel\n");
+    io.print("%s %s x86 kernel\n", KERNEL_NAME, KERNEL_VERSION);
     io.print("Created by: @kkmonlee\n");
     return 0;
+}
+
+int Shell::cmd_fetch(int argc, char** argv) {
+    (void)argv;
+    if (argc != 1) {
+        io.print("Usage: fetch\n");
+        return 1;
+    }
+    char cpu[49];
+    cpu_brand_name(cpu);
+    cpu[39] = 0;
+    u32 flags = irq_save();
+    u64 seconds = pit.get_uptime_ms() / 1000;
+    u32 used_kib = vmm.frames_used * 4;
+    u32 total_kib = vmm.frame_count * 4;
+    irq_restore(flags);
+    u32 cr0;
+    asm volatile("mov %%cr0, %0" : "=r"(cr0));
+
+    io.print("\n%s  %s %s\n", kmos_logo[0], KERNEL_NAME, KERNEL_VERSION);
+    io.print("%s  --------\n", kmos_logo[1]);
+    io.print("%s  Kernel: monolithic\n", kmos_logo[2]);
+    io.print("%s  Arch: x86 (32-bit)\n", kmos_logo[3]);
+    io.print("%s  CPU: %s\n", kmos_logo[4], cpu);
+    io.print("%s  Memory: %u / %u KiB\n", kmos_logo[5], used_kib, total_kib);
+    io.print("%s  Uptime: %uh %um %us\n", kmos_logo[6],
+             (u32)(seconds / 3600), (u32)(seconds / 60 % 60), (u32)(seconds % 60));
+    io.print("%s  Paging: %s, 4 KiB pages\n", kmos_logo[7], cr0 & PAGING_FLAG ? "on" : "off");
+    io.print("%s  Shell: kmOS builtin\n", kmos_logo[8]);
+    io.print("%s  Display: VGA 80x25\n", kmos_logo[9]);
+    io.print("%s  Built: %s\n", kmos_logo[10], KERNEL_DATE);
+    io.print("%s  License: %s\n", kmos_logo[11], KERNEL_LICENCE);
+    for (u32 i = 12; i < sizeof(kmos_logo) / sizeof(kmos_logo[0]); ++i) io.print("%s\n", kmos_logo[i]);
+    io.print("\n");
+    return 0;
+}
+
+int Shell::cmd_lsb_release(int argc, char** argv) {
+    if (argc > 2 || (argc == 2 && strcmp(argv[1], "-a") && strcmp(argv[1], "--all"))) {
+        io.print("Usage: lsb_release [-a|--all]\n");
+        return 1;
+    }
+    return cmd_fetch(1, argv);
 }
 
 int Shell::cmd_exit(int argc, char** argv) {
