@@ -6,10 +6,10 @@
 static volatile u32 timer_interrupt_count = 0;
 
 extern "C" {
-    void isr_timer_int(InterruptFrame *frame) {
+    InterruptFrame *isr_timer_int(InterruptFrame *frame) {
         timer_interrupt_count++;
         pit.tick();
-        arch.handle_timer_interrupt(frame);
+        return arch.handle_timer_interrupt(frame);
     }
     
     u32 get_timer_interrupt_count() {

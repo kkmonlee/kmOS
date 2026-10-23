@@ -1,33 +1,51 @@
 #include <os.h>
 #include <vmm.h>
+#include <serial.h>
 
-extern "C" {
-    void interrupt_handler(int interrupt_number) {
-        io.print("[INT] Unhandled interrupt %d\n", interrupt_number);
+extern "C" void test_gp();
+extern "C" char test_gp_fault, test_gp_resume;
+static volatile u32 testing_exception;
+
+extern "C" void exception_handler(regs_t *frame) {
+    if (testing_exception == 3 && frame->which_int == 3 && frame->err_code == 0 &&
+        frame->eax == 0x12345678 && frame->ebx == 0x87654321 &&
+        frame->cs == 0x08 && frame->ds == 0x10) {
+        frame->eax = 0xabcdef01;
+        testing_exception = 0;
+        return;
     }
-    
-    void isr_GP_exc() {
-        io.print("[PANIC] General Protection Exception\n");
-        while(1);
+    if (testing_exception == 13 && frame->which_int == 13 &&
+        frame->err_code == 0xfff8 && frame->eip == (u32)&test_gp_fault) {
+        frame->eip = (u32)&test_gp_resume;
+        testing_exception = 0;
+        return;
     }
-    
-    void isr_PF_exc(regs_t *regs) {
-        u32 fault_addr;
-        
-        asm volatile("mov %%cr2, %0" : "=r" (fault_addr));
-        
-        int result = vmm.handle_page_fault(fault_addr, regs->err_code);
-        if (result != 0) {
-            io.print("[PANIC] Unhandled page fault at %x, error %x\n", fault_addr, regs->err_code);
-            while(1);
-        }
+    u32 address = 0;
+    if (frame->which_int == 14) {
+        asm volatile("mov %%cr2, %0" : "=r"(address));
+        if (vmm.handle_page_fault(address, frame->err_code) == 0) return;
     }
-    
-    void isr_default_int() {
+    serial::write("[PANIC] exception=");
+    serial::hex(frame->which_int);
+    serial::write(" error=");
+    serial::hex(frame->err_code);
+    serial::write(" eip=");
+    serial::hex(frame->eip);
+    if (frame->which_int == 14) {
+        serial::write(" address=");
+        serial::hex(address);
     }
-    
-    void isr_schedule_int() {
-    }
-    
-    void isr_timer_int();
+    serial::write("\n");
+    io.print("Kernel exception %d, error %x, eip %x\n", frame->which_int, frame->err_code, frame->eip);
+    for (;;) asm volatile("cli; hlt");
+}
+
+extern "C" bool verify_exception_frame() {
+    testing_exception = 3;
+    u32 result = 0x12345678;
+    asm volatile("int3" : "+a"(result) : "b"(0x87654321) : "memory", "cc");
+    if (testing_exception || result != 0xabcdef01) return false;
+    testing_exception = 13;
+    test_gp();
+    return testing_exception == 0;
 }

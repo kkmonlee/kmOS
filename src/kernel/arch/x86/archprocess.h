@@ -36,6 +36,7 @@ extern "C"
     u32 signal;
     void *sigfn[32];
     void *vinfo;
+    u32 interrupt_stack;
   } __attribute__((packed));
 }
 

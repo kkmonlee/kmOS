@@ -1,16 +1,40 @@
-extern isr_default_int, do_syscalls, isr_schedule_int, keyboard_interrupt_handler
-extern isr_timer_int
+extern exception_handler, isr_timer_int
+
+section .text
+
+global load_gdt
+load_gdt:
+    mov eax, [esp + 4]
+    lgdt [eax]
+    jmp 0x08:.reload
+.reload:
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov ax, 0x38
+    ltr ax
+    ret
 
 %macro SAVE_REGS 0
-    pushad                  ; save all general-purpose registers
-    push ds
-    push es
-    push fs
-    push gs
-    push ebx
-    mov bx, 0x10            ; load data segment selector
-    mov ds, bx
-    pop ebx
+    pushad
+    xor eax, eax
+    mov ax, ds
+    push eax
+    mov ax, es
+    push eax
+    mov ax, fs
+    push eax
+    mov ax, gs
+    push eax
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    cld
 %endmacro
 
 %macro RESTORE_REGS 0
@@ -18,77 +42,66 @@ extern isr_timer_int
     pop fs
     pop es
     pop ds
-    popad                  ; restore all general-purpose registers
+    popad
 %endmacro
 
-%macro INTERRUPT 1
-global _asm_int_%1
-_asm_int_%1:
+%macro EXCEPTION 1
+global exception_%1
+exception_%1:
+%if %1 != 8 && %1 != 10 && %1 != 11 && %1 != 12 && %1 != 13 && %1 != 14 && %1 != 17 && %1 != 21 && %1 != 29 && %1 != 30
+    push dword 0
+%endif
+    push dword %1
+    jmp exception_common
+%endmacro
+
+%assign vector 0
+%rep 256
+    EXCEPTION vector
+%assign vector vector + 1
+%endrep
+
+exception_common:
     SAVE_REGS
-    push %1                 ; push interrupt number onto the stack
-    call isr_default_int    ; call default interrupt handler
-    pop eax                 ; remove the interrupt number from the stack
-    mov al, 0x20
-    out 0x20, al            ; send end-of-interrupt signal to PIC
+    mov ebp, esp
+    and esp, -16
+    sub esp, 12
+    push ebp
+    call exception_handler
+    mov esp, ebp
     RESTORE_REGS
+    add esp, 8
     iret
-%endmacro
 
-; Timer interrupt (IRQ0 = vector 32)
 global _asm_int_32
 _asm_int_32:
     SAVE_REGS
-    push esp
+    mov ebp, esp
+    and esp, -16
+    sub esp, 12
+    push ebp
     call isr_timer_int
-    add esp, 4
+    mov esp, eax
     mov al, 0x20
-    out 0x20, al            ; send EOI to PIC
+    out 0x20, al
     RESTORE_REGS
     iret
 
-; Keyboard interrupt (IRQ1 = vector 33) - defined in isr_kbd.asm
+global test_gp, test_gp_fault, test_gp_resume
+test_gp:
+    mov ax, 0xfff8
+test_gp_fault:
+    mov ds, ax
+test_gp_resume:
+    ret
 
-extern isr_GP_exc, isr_PF_exc 
-global _asm_exc_GP, _asm_exc_PF
+section .rodata align=4
+global exception_stubs
+exception_stubs:
+%assign vector 0
+%rep 256
+    dd exception_%+vector
+%assign vector vector + 1
+%endrep
 
-; Syscall handler - disabled until do_syscalls is implemented
-; global _asm_syscalls
-; _asm_syscalls:
-;     SAVE_REGS
-;     push eax                ; pass syscall number
-;     call do_syscalls
-;     pop eax
-;     cli                     ; clear interrupts
-;     sti                     ; enable interrupts
-;     RESTORE_REGS
-;     iret
-
-_asm_exc_GP:
-    SAVE_REGS
-    call isr_GP_exc
-    RESTORE_REGS
-    add esp, 4              ; adjust stack pointer
-    iret
-
-_asm_exc_PF:
-    SAVE_REGS
-    push esp                ; pass register state to handler
-    call isr_PF_exc
-    add esp, 4              ; remove pushed esp
-    RESTORE_REGS
-    add esp, 4              ; adjust stack pointer (remove error code)
-    iret
-
-global _asm_schedule
-_asm_schedule:
-    SAVE_REGS
-    call isr_schedule_int   ; invoke scheduler
-    mov al, 0x20
-    out 0x20, al            ; send end-of-interrupt signal to PIC
-    RESTORE_REGS
-    iret
-
-INTERRUPT 1                ; define ISR for interrupt vector 1
-INTERRUPT 2                ; define ISR for interrupt vector 2
-
-; Keyboard ISR is implemented in separate file isr_kbd.asm
+section .note.GNU-stack noalloc noexec nowrite progbits

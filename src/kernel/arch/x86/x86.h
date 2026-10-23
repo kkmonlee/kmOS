@@ -4,8 +4,8 @@
 #include <runtime/types.h>
 
 /* descriptor table sizes */
-#define IDTSIZE 0xFF
-#define GDTSIZE 0xFF
+#define IDTSIZE 256
+#define GDTSIZE 8
 
 /* base addresses for descriptor tables */
 #define IDTBASE 0x00000000
@@ -110,11 +110,24 @@ struct idtr
 /* cpu registers during interrupt */
 typedef struct
 {
+    u32 gs, fs, es, ds;
     u32 edi, esi, ebp, esp, ebx, edx, ecx, eax;
-    u32 ds, es, fs, gs;
     u32 which_int, err_code;
     u32 eip, cs, eflags, user_esp, user_ss;
 } __attribute__((packed)) regs_t;
+
+static_assert(__builtin_offsetof(regs_t, which_int) == 48, "exception vector offset");
+static_assert(__builtin_offsetof(regs_t, eip) == 56, "exception return offset");
+
+static inline u32 irq_save() {
+    u32 flags;
+    asm volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    return flags;
+}
+
+static inline void irq_restore(u32 flags) {
+    asm volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
 
 typedef void (*int_desc)(void);
 
@@ -125,6 +138,7 @@ extern "C"
     void init_idt_desc(u16, u32, u16, struct idtdesc *);
     void init_idt(void);
     void init_pic(void);
+    bool verify_exception_frame();
     int install_irq(unsigned int num, unsigned int irq);
     void switch_to_task(struct process_st *current, int mode);
     extern tss default_tss;

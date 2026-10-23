@@ -97,8 +97,10 @@ void VMM::update_frame_counts() {
 }
 
 u32 VMM::alloc_frames(u32 count) {
+    u32 flags = irq_save();
     u32 address = physical_memory.allocate(count);
     update_frame_counts();
+    irq_restore(flags);
     return address;
 }
 
@@ -107,8 +109,10 @@ u32 VMM::alloc_frame() {
 }
 
 void VMM::free_frame(u32 address) {
+    u32 flags = irq_save();
     physical_memory.release(address);
     update_frame_counts();
+    irq_restore(flags);
 }
 
 bool VMM::init_physical_memory(const multiboot_info *boot) {
@@ -229,7 +233,7 @@ bool VMM::verify_page_tables() {
         map_page(pd, address, frame, PG_PRESENT | PG_WRITE | PG_USER) == 0 &&
         get_physical_addr(pd, address + 123) == frame + 123;
     page_table_entry *table = get_page_table(pd, address, 0);
-    valid = valid && table && ((u32)table == (pd->tables[VADDR_PD_OFFSET(address)].frame << 12)) &&
+    valid = valid && table && ((u32)table == ((u32)pd->tables[VADDR_PD_OFFSET(address)].frame << 12)) &&
         pd->tables[VADDR_PD_OFFSET(address)].user &&
         map_page(pd, address + 1, frame, PG_PRESENT) != 0;
     destroy_page_directory(pd);
@@ -365,17 +369,6 @@ void pd0_add_page(char *v_addr, char *p_addr, unsigned int flags) {
 void pd_add_page(char *v_addr, char *p_addr, u32 flags, struct page_directory *pd) {
     if (pd) {
         vmm.map_page(pd, (u32)v_addr, (u32)p_addr, flags);
-    }
-}
-
-void page_fault_handler(regs_t *regs) {
-    u32 fault_addr;
-    asm volatile("mov %%cr2, %0" : "=r" (fault_addr));
-    
-    int result = vmm.handle_page_fault(fault_addr, regs->err_code);
-    if (result != 0) {
-        io.print("[PANIC] Unhandled page fault at %x\n", fault_addr);
-        while(1);
     }
 }
 

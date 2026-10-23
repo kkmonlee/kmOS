@@ -101,7 +101,6 @@ extern "C" {
     char *get_page_frame();
     void pd0_add_page(char *v_addr, char *p_addr, unsigned int flags);
     void pd_add_page(char *v_addr, char *p_addr, u32 flags, struct page_directory *pd);
-    void page_fault_handler(regs_t *regs);
     void enable_paging();
     void switch_page_directory_asm(u32 physical_addr);
 }

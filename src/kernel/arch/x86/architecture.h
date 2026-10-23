@@ -27,6 +27,8 @@ struct InterruptFrame
   u32 ss;
 } __attribute__((packed));
 
+static_assert(__builtin_offsetof(InterruptFrame, eip) == 48, "timer return offset");
+
 class Architecture
 {
 public:
@@ -39,7 +41,7 @@ public:
   void enable_interrupt();
   void disable_interrupt();
   void configure_scheduler(u32 pit_frequency_hz);
-  void handle_timer_interrupt(InterruptFrame *frame);
+  InterruptFrame *handle_timer_interrupt(InterruptFrame *frame);
 
   int createProc(process_st *info, char *file, int argc, char **argv);
   void setParam(u32 ret, u32 ret1, u32 ret2, u32 ret3, u32 ret4);
@@ -58,7 +60,7 @@ private:
   void enqueue_process(Process *proc, bool make_current);
   void ensure_idle_process();
   void save_process_context(Process *proc, const InterruptFrame *frame);
-  void load_process_context(Process *proc, InterruptFrame *frame);
+  InterruptFrame *load_process_context(Process *proc);
   void remove_process(Process *proc);
   Process *find_previous(Process *target);
 

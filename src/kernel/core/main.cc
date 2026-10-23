@@ -70,6 +70,14 @@ extern "C" void kmain(u32 magic, const multiboot_info *boot)
         serial_print("[PANIC] Invalid Multiboot information\n");
         for (;;) asm volatile("cli; hlt");
     }
+    init_gdt();
+    init_idt();
+    init_pic();
+    if (!verify_exception_frame()) {
+        serial_print("[PANIC] Exception frame verification failed\n");
+        for (;;) asm volatile("cli; hlt");
+    }
+    serial_print("[CPU] Exception frames verified\n");
     arch.init(boot);
     
     Process *kernel_process = new Process(const_cast<char*>("kernel_main"));
@@ -96,10 +104,6 @@ extern "C" void kmain(u32 magic, const multiboot_info *boot)
     serial_print("KMAIN: Initializing keyboard driver\n");
     
     keyboard.init();
-    
-    serial_print("KMAIN: Initializing IDT and PIC\n");
-    init_idt();
-    init_pic();
     
     serial_print("KMAIN: Initializing PIT timer\n");
     pit.init(100);

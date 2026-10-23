@@ -159,9 +159,9 @@ void Architecture::ensure_idle_process()
     idle->time_slice = 0;
     idle->total_runtime = 0;
 
-    disable_interrupt();
+    u32 interrupt_flags = irq_save();
     enqueue_process(idle, false);
-    enable_interrupt();
+    irq_restore(interrupt_flags);
 }
 
 void Architecture::addProcess(Process *p)
@@ -171,10 +171,10 @@ void Architecture::addProcess(Process *p)
         return;
     }
 
-    disable_interrupt();
+    u32 interrupt_flags = irq_save();
     bool list_was_empty = (plist == nullptr);
     enqueue_process(p, list_was_empty);
-    enable_interrupt();
+    irq_restore(interrupt_flags);
 
     if (list_was_empty)
     {
@@ -249,7 +249,7 @@ void Architecture::change_process_father(Process *child, Process *new_father)
         return;
     }
 
-    disable_interrupt();
+    u32 interrupt_flags = irq_save();
     Process *cursor = plist;
     if (cursor != nullptr)
     {
@@ -262,7 +262,7 @@ void Architecture::change_process_father(Process *child, Process *new_father)
             cursor = cursor->getPNext();
         } while (cursor != nullptr && cursor != plist);
     }
-    enable_interrupt();
+    irq_restore(interrupt_flags);
 }
 
 Process *Architecture::find_previous(Process *target)
@@ -353,9 +353,9 @@ void Architecture::destroy_process(Process *proc)
         return;
     }
 
-    disable_interrupt();
+    u32 interrupt_flags = irq_save();
     remove_process(proc);
-    enable_interrupt();
+    irq_restore(interrupt_flags);
 
     delete proc;
 }
@@ -367,11 +367,11 @@ struct page_directory *Architecture::get_current_page_directory()
 
 void Architecture::destroy_all_zombie()
 {
-    disable_interrupt();
+    u32 interrupt_flags = irq_save();
 
     if (plist == nullptr)
     {
-        enable_interrupt();
+        irq_restore(interrupt_flags);
         return;
     }
 
@@ -396,7 +396,7 @@ void Architecture::destroy_all_zombie()
         cursor = next;
     } while (cursor != nullptr && cursor != plist);
 
-    enable_interrupt();
+    irq_restore(interrupt_flags);
 
     while (pending_cleanup != nullptr)
     {
@@ -420,7 +420,8 @@ void Architecture::save_process_context(Process *proc, const InterruptFrame *fra
     info->regs.ecx = frame->ecx;
     info->regs.edx = frame->edx;
     info->regs.ebx = frame->ebx;
-    info->regs.esp = frame->esp;
+    info->interrupt_stack = (u32)frame;
+    info->regs.esp = (frame->cs & 3) ? frame->useresp : (u32)frame + __builtin_offsetof(InterruptFrame, useresp);
     info->regs.ebp = frame->ebp;
     info->regs.esi = frame->esi;
     info->regs.edi = frame->edi;
@@ -431,7 +432,7 @@ void Architecture::save_process_context(Process *proc, const InterruptFrame *fra
     info->regs.es = frame->es & 0xFFFF;
     info->regs.fs = frame->fs & 0xFFFF;
     info->regs.gs = frame->gs & 0xFFFF;
-    info->regs.ss = 0x10;
+    info->regs.ss = (frame->cs & 3) ? frame->ss : 0x10;
 
     if (current_directory != nullptr)
     {
@@ -439,14 +440,11 @@ void Architecture::save_process_context(Process *proc, const InterruptFrame *fra
     }
 }
 
-void Architecture::load_process_context(Process *proc, InterruptFrame *frame)
+InterruptFrame *Architecture::load_process_context(Process *proc)
 {
-    if (proc == nullptr || frame == nullptr)
-    {
-        return;
-    }
-
     process_st *info = proc->getPInfo();
+    InterruptFrame *frame = (InterruptFrame *)(info->interrupt_stack ? info->interrupt_stack :
+        info->regs.esp - __builtin_offsetof(InterruptFrame, useresp));
 
     frame->eax = info->regs.eax;
     frame->ecx = info->regs.ecx;
@@ -464,23 +462,26 @@ void Architecture::load_process_context(Process *proc, InterruptFrame *frame)
     frame->es = info->regs.es ? info->regs.es : data_selector;
     frame->fs = info->regs.fs ? info->regs.fs : data_selector;
     frame->gs = info->regs.gs ? info->regs.gs : data_selector;
-    frame->ss = info->regs.ss ? info->regs.ss : data_selector;
-    frame->useresp = info->regs.esp;
+    if (info->regs.cs & 3) {
+        frame->ss = info->regs.ss;
+        frame->useresp = info->regs.esp;
+    }
     frame->eflags = (info->regs.eflags ? info->regs.eflags : 0x202) | 0x200;
 
     if (info->pd != nullptr && info->pd != current_directory)
     {
         vmm.switch_page_directory(info->pd);
     }
+    return frame;
 }
 
-void Architecture::handle_timer_interrupt(InterruptFrame *frame)
+InterruptFrame *Architecture::handle_timer_interrupt(InterruptFrame *frame)
 {
     total_ticks++;
 
     if (!scheduler_ready || pcurrent == nullptr)
     {
-        return;
+        return frame;
     }
 
     save_process_context(pcurrent, frame);
@@ -501,18 +502,14 @@ void Architecture::handle_timer_interrupt(InterruptFrame *frame)
 
     if (!need_switch)
     {
-        return;
+        return frame;
     }
 
     ticks_since_switch = 0;
 
     Process *next = pcurrent->schedule();
-    if (next == nullptr)
-    {
-        load_process_context(pcurrent, frame);
-        return;
-    }
+    if (next == nullptr || next == pcurrent) return frame;
 
     pcurrent = next;
-    load_process_context(pcurrent, frame);
+    return load_process_context(pcurrent);
 }

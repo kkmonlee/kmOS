@@ -4,6 +4,9 @@
 
 extern "C" void _asm_int_32();
 extern "C" void _asm_int_33();
+extern "C" u32 exception_stubs[IDTSIZE];
+extern "C" char boot_stack_top;
+extern "C" void load_gdt(const gdtr *);
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
@@ -65,26 +68,22 @@ extern "C"
 
   void init_gdt(void)
   {
-    default_tss.debug_flag = 0x00;
-    default_tss.io_map = 0x00;
-    default_tss.esp0 = 0x1FFF0;
-    default_tss.ss0 = 0x18;
+    default_tss.io_map = sizeof(tss);
+    default_tss.esp0 = (u32)&boot_stack_top;
+    default_tss.ss0 = 0x10;
 
-    init_gdt_desc(0x0, 0x0, 0x0, 0x0, &kgdt[0]);
-    init_gdt_desc(0x0, 0xFFFFF, 0x9B, 0x0D, &kgdt[1]);
-    init_gdt_desc(0x0, 0xFFFFF, 0x93, 0x0D, &kgdt[2]);
-    init_gdt_desc(0x0, 0x0, 0x97, 0x0D, &kgdt[3]);
-    init_gdt_desc(0x0, 0xFFFFF, 0xFF, 0x0D, &kgdt[4]);
-    init_gdt_desc(0x0, 0xFFFFF, 0xF3, 0x0D, &kgdt[5]);
-    init_gdt_desc(0x0, 0x0, 0xF7, 0x0D, &kgdt[6]);
-    init_gdt_desc((u32)&default_tss, 0x67, 0xE9, 0x00, &kgdt[7]);
+    init_gdt_desc(0, 0, 0, 0, &kgdt[0]);
+    init_gdt_desc(0, 0xFFFFF, 0x9A, 0x0C, &kgdt[1]);
+    init_gdt_desc(0, 0xFFFFF, 0x92, 0x0C, &kgdt[2]);
+    init_gdt_desc(0, 0, 0, 0, &kgdt[3]);
+    init_gdt_desc(0, 0xFFFFF, 0xFA, 0x0C, &kgdt[4]);
+    init_gdt_desc(0, 0xFFFFF, 0xF2, 0x0C, &kgdt[5]);
+    init_gdt_desc(0, 0, 0, 0, &kgdt[6]);
+    init_gdt_desc((u32)&default_tss, sizeof(tss) - 1, 0x89, 0, &kgdt[7]);
 
-    kgdtr.limite = GDTSIZE * 8;
-    kgdtr.base = GDTBASE;
-
-    memcpy((char *)kgdtr.base, (char *)kgdt, kgdtr.limite);
-
-    asm volatile ("lgdt (%0)" :: "r"(&kgdtr));
+    kgdtr.limite = sizeof(kgdt) - 1;
+    kgdtr.base = (u32)kgdt;
+    load_gdt(&kgdtr);
   }
 
   void init_idt_desc(u16 select, u32 offset, u16 type, struct idtdesc *desc)
@@ -98,42 +97,31 @@ extern "C"
 
   void init_idt(void)
   {
-    for (int i = 0; i < IDTSIZE; i++)
-    {
-      init_idt_desc(0x08, 0, INTGATE, &kidt[i]);
+    for (u32 i = 0; i < IDTSIZE; ++i) {
+      init_idt_desc(0x08, exception_stubs[i], INTGATE, &kidt[i]);
     }
-
-    init_idt_desc(0x08, 0, INTGATE, &kidt[13]);
-    init_idt_desc(0x08, 0, INTGATE, &kidt[14]);
-
     init_idt_desc(0x08, (u32)_asm_int_32, INTGATE, &kidt[32]);
     init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);
-    init_idt_desc(0x08, 0, TRAPGATE, &kidt[128]);
-
-    kidtr.limite = IDTSIZE * 8;
-    kidtr.base = IDTBASE;
-
-    memcpy((char *)kidtr.base, (char *)kidt, kidtr.limite);
-
-    asm volatile ("lidt (%0)" :: "r"(&kidtr));
+    kidtr.limite = sizeof(kidt) - 1;
+    kidtr.base = (u32)kidt;
+    asm volatile("lidt (%0)" :: "r"(&kidtr) : "memory");
   }
 
   void init_pic(void)
   {
-    io.outb(0x20, 0x11); // ICW1
+    io.outb(0x20, 0x11);
     io.outb(0xA0, 0x11);
 
-    io.outb(0x21, 0x20); // ICW2 (start vector = 32)
-    io.outb(0xA1, 0x70);
+    io.outb(0x21, 0x20);
+    io.outb(0xA1, 0x28);
 
-    io.outb(0x21, 0x04); // ICW3
+    io.outb(0x21, 0x04);
     io.outb(0xA1, 0x02);
 
-    io.outb(0x21, 0x01); // ICW4
+    io.outb(0x21, 0x01);
     io.outb(0xA1, 0x01);
 
-    // unmask IRQ0 (timer) and IRQ1 (keyboard)
-    io.outb(0x21, 0xFC); // 11111100b -> unmask bits 0 and 1
-    io.outb(0xA1, 0xFF); // mask all slave IRQs
+    io.outb(0x21, 0xFC);
+    io.outb(0xA1, 0xFF);
   }
 }
