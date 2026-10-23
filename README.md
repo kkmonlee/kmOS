@@ -31,8 +31,6 @@ The shell runs in kernel space. Userland and filesystems still need work.
 
 ## Screenshots
 
-`fetch`, using the planet logo above:
-
 ![kmOS logo and system info in QEMU](media/fetch.png)
 
 Memory, processes and uptime:
