@@ -102,6 +102,7 @@ private:
     u32 calculate_order(u32 size);
     u32 calculate_objects_per_page(u32 obj_size, u32 order);
     struct slub_cache *find_size_cache(u32 size);
+    struct slub_page *find_page(struct slub_cache *cache, void *obj);
     u32 get_cpu_id();
     void *cpu_cache_alloc(struct slub_cache *cache);
     void cpu_cache_free(struct slub_cache *cache, void *obj);

@@ -64,7 +64,8 @@ struct slab_cache *SlabAllocator::cache_create(const char *name, u32 size, u32 a
     cache->dtor = dtor;
     
     u32 slab_size = MIN_BLOCK_SIZE;
-    while (slab_size < cache->obj_size * 8 && slab_size < SLAB_MAX_SIZE) {
+    while (slab_size < cache->obj_size ||
+           (slab_size < cache->obj_size * 8 && slab_size < SLAB_MAX_SIZE)) {
         slab_size *= 2;
     }
     
@@ -161,15 +162,16 @@ void *SlabAllocator::cache_alloc(struct slab_cache *cache) {
     return obj;
 }
 
-void SlabAllocator::cache_free(struct slab_cache *cache, void *obj) {
-    if (!cache || !obj) return;
+bool SlabAllocator::cache_free(struct slab_cache *cache, void *obj) {
+    if (!cache || !obj) return false;
     
     struct slab *slab = nullptr;
     struct slab *current = cache->slabs_full;
     while (current) {
         u8 *slab_start = (u8*)current->mem;
-        u8 *slab_end = slab_start + (1 << current->order) * MIN_BLOCK_SIZE;
-        if ((u8*)obj >= slab_start && (u8*)obj < slab_end) {
+        u8 *slab_end = slab_start + cache->num_objs_per_slab * cache->obj_size;
+        if ((u8*)obj >= slab_start && (u8*)obj < slab_end &&
+            ((u8*)obj - slab_start) % cache->obj_size == 0) {
             slab = current;
             break;
         }
@@ -180,8 +182,9 @@ void SlabAllocator::cache_free(struct slab_cache *cache, void *obj) {
         current = cache->slabs_partial;
         while (current) {
             u8 *slab_start = (u8*)current->mem;
-            u8 *slab_end = slab_start + (1 << current->order) * MIN_BLOCK_SIZE;
-            if ((u8*)obj >= slab_start && (u8*)obj < slab_end) {
+            u8 *slab_end = slab_start + cache->num_objs_per_slab * cache->obj_size;
+            if ((u8*)obj >= slab_start && (u8*)obj < slab_end &&
+                ((u8*)obj - slab_start) % cache->obj_size == 0) {
                 slab = current;
                 break;
             }
@@ -189,7 +192,7 @@ void SlabAllocator::cache_free(struct slab_cache *cache, void *obj) {
         }
     }
     
-    if (!slab) return;
+    if (!slab) return false;
     
     if (cache->dtor) {
         cache->dtor(obj);
@@ -206,6 +209,7 @@ void SlabAllocator::cache_free(struct slab_cache *cache, void *obj) {
     } else if (slab->free == cache->num_objs_per_slab) {
         move_slab(&cache->slabs_partial, &cache->slabs_empty, slab);
     }
+    return true;
 }
 
 struct slab *SlabAllocator::slab_create(struct slab_cache *cache) {
@@ -313,16 +317,8 @@ void *SlabAllocator::kmem_cache_alloc(u32 size) {
 void SlabAllocator::kmem_cache_free(void *obj) {
     if (!obj) return;
     
-    struct slab_obj *slab_obj = (struct slab_obj*)obj;
-    if (slab_obj->magic != SLAB_MAGIC) {
-        return;
-    }
-    
     for (int i = 0; i < 12; i++) {
-        if (size_caches[i]) {
-            cache_free(size_caches[i], obj);
-            return;
-        }
+        if (cache_free(size_caches[i], obj)) return;
     }
 }
 

@@ -59,7 +59,7 @@ public:
                                    void (*ctor)(void*), void (*dtor)(void*));
     void cache_destroy(struct slab_cache *cache);
     void *cache_alloc(struct slab_cache *cache);
-    void cache_free(struct slab_cache *cache, void *obj);
+    bool cache_free(struct slab_cache *cache, void *obj);
     void cache_reap();
     void print_stats();
     

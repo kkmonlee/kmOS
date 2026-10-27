@@ -1,5 +1,6 @@
 #include <os.h>
 #include <runtime/unified_alloc.h>
+#include <arch/x86/x86.h>
 
 extern "C" {
     void *memset(void *s, int c, int n);
@@ -7,6 +8,38 @@ extern "C" {
 }
 
 UnifiedAllocator unified_allocator;
+
+static const u32 ALLOCATION_MAGIC = 0xa110ca7e;
+static const u32 ALLOCATION_ALIGNMENT = 16;
+
+struct allocation_header {
+    u32 magic;
+    u32 size;
+    u32 flags;
+    u32 allocator;
+    void *base;
+};
+
+class AllocationGuard {
+public:
+    AllocationGuard() : flags(irq_save()) {}
+    ~AllocationGuard() { irq_restore(flags); }
+private:
+    u32 flags;
+};
+
+static u32 mode_policy(enum system_mode mode) {
+    switch (mode) {
+        case SYS_MODE_EMBEDDED:
+            return ALLOC_POLICY_SLOB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK;
+        case SYS_MODE_SERVER:
+            return ALLOC_POLICY_SLUB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK | ALLOC_POLICY_AUTO;
+        case SYS_MODE_REALTIME:
+            return ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK;
+        default:
+            return ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK | ALLOC_POLICY_AUTO;
+    }
+}
 
 void UnifiedAllocator::init(enum system_mode mode) {
     io.print("[UNIFIED] Initializing unified allocator in %s mode\n", 
@@ -22,39 +55,36 @@ void UnifiedAllocator::init(enum system_mode mode) {
     
     memset(&stats, 0, sizeof(stats));
     
-    switch (mode) {
-        case SYS_MODE_EMBEDDED:
-            policy_mask = ALLOC_POLICY_SLOB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK;
-            break;
-        case SYS_MODE_DESKTOP:
-            policy_mask = ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK | ALLOC_POLICY_AUTO;
-            break;
-        case SYS_MODE_SERVER:
-            policy_mask = ALLOC_POLICY_SLUB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK | ALLOC_POLICY_AUTO;
-            break;
-        case SYS_MODE_REALTIME:
-            policy_mask = ALLOC_POLICY_SLAB | ALLOC_POLICY_BUDDY | ALLOC_POLICY_STACK;
-            break;
-    }
+    policy_mask = mode_policy(mode);
     
     io.print("[UNIFIED] Policy mask: 0x%x\n", policy_mask);
 }
 
 void *UnifiedAllocator::alloc(u32 size, u32 flags) {
-    if (size == 0) return 0;
-    
+    const u32 overhead = sizeof(allocation_header) + ALLOCATION_ALIGNMENT - 1;
+    const u32 maximum = (MIN_BLOCK_SIZE << MAX_ORDER) - sizeof(buddy_block);
+    if (!size || size > maximum - overhead) return nullptr;
+
+    AllocationGuard guard;
     u32 allocator = select_allocator(size, flags);
-    void *ptr = internal_alloc(size, flags, allocator);
-    
-    if (ptr) {
-        update_stats(size, allocator, true);
-        if (debug_tracking) {
-            track_allocation(ptr, size, flags, allocator);
-        }
-        
-        if (flags & ALLOC_FLAG_ZERO) {
-            memset(ptr, 0, size);
-        }
+    void *base = internal_alloc(size + overhead, allocator);
+    if (!base) return nullptr;
+
+    u32 address = ((u32)base + overhead) & ~(ALLOCATION_ALIGNMENT - 1);
+    void *ptr = (void *)address;
+    allocation_header *header = (allocation_header *)ptr - 1;
+    header->magic = ALLOCATION_MAGIC;
+    header->size = size;
+    header->flags = flags;
+    header->allocator = allocator;
+    header->base = base;
+
+    update_stats(size, allocator, true);
+    if (debug_tracking) {
+        track_allocation(ptr, size, flags, allocator);
+    }
+    if (flags & ALLOC_FLAG_ZERO) {
+        memset(ptr, 0, size);
     }
     
     return ptr;
@@ -63,19 +93,16 @@ void *UnifiedAllocator::alloc(u32 size, u32 flags) {
 void UnifiedAllocator::free(void *ptr) {
     if (!ptr) return;
     
-    u32 allocator_hint = 0;
-    struct allocation_metadata *meta = 0;
-    
-    if (debug_tracking) {
-        meta = find_allocation(ptr);
-        if (meta) {
-            allocator_hint = meta->allocator_used;
-            update_stats(meta->size, allocator_hint, false);
-            untrack_allocation(ptr);
-        }
-    }
-    
-    internal_free(ptr, allocator_hint);
+    AllocationGuard guard;
+    allocation_header *header = (allocation_header *)ptr - 1;
+    if (header->magic != ALLOCATION_MAGIC) return;
+
+    u32 allocator = header->allocator;
+    void *base = header->base;
+    update_stats(header->size, allocator, false);
+    untrack_allocation(ptr);
+    header->magic = 0;
+    internal_free(base, allocator);
 }
 
 void *UnifiedAllocator::realloc(void *ptr, u32 new_size) {
@@ -88,10 +115,12 @@ void *UnifiedAllocator::realloc(void *ptr, u32 new_size) {
         return 0;
     }
     
-    struct allocation_metadata *meta = find_allocation(ptr);
-    u32 old_size = meta ? meta->size : 0;
+    AllocationGuard guard;
+    allocation_header *header = (allocation_header *)ptr - 1;
+    if (header->magic != ALLOCATION_MAGIC) return nullptr;
+    u32 old_size = header->size;
     
-    void *new_ptr = alloc(new_size);
+    void *new_ptr = alloc(new_size, header->flags);
     if (!new_ptr) {
         return 0;
     }
@@ -106,12 +135,8 @@ void *UnifiedAllocator::realloc(void *ptr, u32 new_size) {
 }
 
 void *UnifiedAllocator::calloc(u32 count, u32 size) {
-    u32 total_size = count * size;
-    if (total_size / count != size) {
-        return 0;
-    }
-    
-    return alloc(total_size, ALLOC_FLAG_ZERO);
+    if (!count || !size || size > ~0U / count) return nullptr;
+    return alloc(count * size, ALLOC_FLAG_ZERO);
 }
 
 u32 UnifiedAllocator::select_allocator(u32 size, u32 flags) {
@@ -121,7 +146,7 @@ u32 UnifiedAllocator::select_allocator(u32 size, u32 flags) {
         return ALLOC_POLICY_STACK;
     }
     
-    if (flags & ALLOC_FLAG_DMA && !(policy_mask & ALLOC_POLICY_BUDDY)) {
+    if (flags & ALLOC_FLAG_DMA) {
         return ALLOC_POLICY_BUDDY;
     }
     
@@ -154,10 +179,10 @@ u32 UnifiedAllocator::select_allocator(u32 size, u32 flags) {
     return ALLOC_POLICY_BUDDY;
 }
 
-void *UnifiedAllocator::internal_alloc(u32 size, u32 /*flags*/, u32 preferred_allocator) {
+void *UnifiedAllocator::internal_alloc(u32 size, u32 &allocator) {
     void *ptr = 0;
     
-    switch (preferred_allocator) {
+    switch (allocator) {
         case ALLOC_POLICY_SLOB:
             ptr = slob_allocator.alloc(size);
             break;
@@ -176,16 +201,14 @@ void *UnifiedAllocator::internal_alloc(u32 size, u32 /*flags*/, u32 preferred_al
             
         case ALLOC_POLICY_BUDDY:
         default:
-            u32 order = buddy_allocator.get_order(size);
-            ptr = buddy_allocator.alloc(PAGE_SIZE << order);
+            ptr = buddy_allocator.alloc(size);
             break;
     }
     
-    if (!ptr && preferred_allocator != ALLOC_POLICY_BUDDY) {
-        u32 order = buddy_allocator.get_order(size);
-        ptr = buddy_allocator.alloc(PAGE_SIZE << order);
+    if (!ptr && allocator != ALLOC_POLICY_BUDDY) {
+        ptr = buddy_allocator.alloc(size);
         if (ptr) {
-            preferred_allocator = ALLOC_POLICY_BUDDY;
+            allocator = ALLOC_POLICY_BUDDY;
         }
     }
     
@@ -199,17 +222,8 @@ void UnifiedAllocator::internal_free(void *ptr, u32 allocator_hint) {
         slab_allocator.kmem_cache_free(ptr);
     } else if (allocator_hint == ALLOC_POLICY_SLUB) {
         slub_allocator.free(ptr);
-    } else {
-        slob_allocator.free(ptr);
-        if (!ptr) {
-            slab_allocator.kmem_cache_free(ptr);
-            if (!ptr) {
-                slub_allocator.free(ptr);
-                if (!ptr) {
-                    buddy_allocator.free(ptr);
-                }
-            }
-        }
+    } else if (allocator_hint == ALLOC_POLICY_BUDDY) {
+        buddy_allocator.free(ptr);
     }
 }
 
@@ -269,39 +283,48 @@ struct allocation_metadata *UnifiedAllocator::find_allocation(void *ptr) {
 }
 
 void UnifiedAllocator::enable_debug_tracking() {
+    AllocationGuard guard;
     if (!debug_table) {
         debug_table_size = 1024;
         debug_table = (struct allocation_metadata*)buddy_allocator.alloc(
             debug_table_size * sizeof(struct allocation_metadata));
     }
-    debug_tracking = true;
+    debug_tracking = debug_table != nullptr;
     io.print("[UNIFIED] Debug tracking enabled\n");
 }
 
 void UnifiedAllocator::disable_debug_tracking() {
+    AllocationGuard guard;
     debug_tracking = false;
     io.print("[UNIFIED] Debug tracking disabled\n");
 }
 
-void *UnifiedAllocator::alloc_pages(u32 order, u32 /*flags*/) {
-    return buddy_allocator.alloc(PAGE_SIZE << order);
+void *UnifiedAllocator::alloc_pages(u32 order, u32 flags) {
+    if (order >= MAX_ORDER) return nullptr;
+    AllocationGuard guard;
+    void *ptr = buddy_allocator.alloc(PAGE_SIZE << order);
+    if (ptr && (flags & ALLOC_FLAG_ZERO)) memset(ptr, 0, PAGE_SIZE << order);
+    return ptr;
 }
 
 void UnifiedAllocator::free_pages(void *ptr, u32 /*order*/) {
+    AllocationGuard guard;
     buddy_allocator.free(ptr);
 }
 
 void UnifiedAllocator::set_policy(u32 new_policy_mask) {
+    AllocationGuard guard;
     io.print("[UNIFIED] Changing policy from 0x%x to 0x%x\n", policy_mask, new_policy_mask);
     policy_mask = new_policy_mask;
     stats.policy_switches++;
 }
 
 void UnifiedAllocator::set_system_mode(enum system_mode mode) {
+    AllocationGuard guard;
     if (mode != current_mode) {
         io.print("[UNIFIED] Switching from mode %d to mode %d\n", current_mode, mode);
         current_mode = mode;
-        init(mode);
+        set_policy(mode_policy(mode));
     }
 }
 

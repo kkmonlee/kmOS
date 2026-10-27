@@ -152,7 +152,10 @@ def boot(args, ram, machine="pc"):
         text = vm.serial_command("uptime")
         assert int(re.findall(r"Timer ticks: (\d+)", text)[-1]) > ticks, text
         assert "kernel_main" in text and "idle" in text, text
+        for command in ("ls /dev", "ls /mnt", "ls /sys"):
+            text = vm.serial_command(command)
         assert "[PANIC]" not in text, text
+        assert "Invalid magic" not in text and "Invalid block" not in text, text
     print(f"PASS boot, paging, keyboard, serial and timer: {machine}, {ram} MB", flush=True)
 
 
@@ -169,6 +172,15 @@ def paging(args, ram, module=None):
             assert f"[TEST] module hash={expected:08x}" in text, text
     print(f"PASS demand paging, remapping, address spaces and frame exhaustion: {ram} MB"
           + (", boot module preserved" if module else ""), flush=True)
+
+
+def heap(args, ram):
+    with VM(args, f"heap-{ram}", ram, append="test=heap") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[HEAP] allocation, reuse, realloc and exhaustion verified" in text, text
+        assert "[PANIC]" not in text and "Invalid magic" not in text and "Invalid block" not in text, text
+    print(f"PASS heap ownership, reuse, realloc and exhaustion: {ram} MB", flush=True)
 
 
 def fault(args, case, vector, error, address=None, ram=64):
@@ -208,6 +220,7 @@ def main():
     for ram in (16, 32, 64, 128, 512, 1536):
         boot(args, ram)
         paging(args, ram)
+        heap(args, ram)
     boot(args, 64, "q35")
     with tempfile.TemporaryDirectory(prefix="kmos-module-") as temp:
         module = Path(temp) / "module.bin"

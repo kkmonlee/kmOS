@@ -163,12 +163,9 @@ void *SLUBAllocator::cache_alloc(struct slub_cache *cache) {
 
 void SLUBAllocator::cache_free(struct slub_cache *cache, void *obj) {
     if (!cache || !obj) return;
-    
-    struct slub_object *slub_obj = (struct slub_object*)obj;
-    if (slub_obj->magic != SLUB_MAGIC) {
-        io.print("[SLUB] Invalid magic in object at %x\n", (u32)obj);
-        return;
-    }
+
+    struct slub_page *page = find_page(cache, obj);
+    if (!page) return;
     
     if (cache->dtor) {
         cache->dtor(obj);
@@ -180,41 +177,20 @@ void SLUBAllocator::cache_free(struct slub_cache *cache, void *obj) {
         return;
     }
     
-    struct slub_page *page = 0;
-    for (struct slub_page *p = cache->full_pages; p; p = p->next) {
-        if ((u32)obj >= (u32)p->page_base && 
-            (u32)obj < (u32)p->page_base + (PAGE_SIZE << p->order)) {
-            page = p;
-            break;
-        }
+    bool was_full = (page->inuse == page->objects);
+
+    free_to_page(cache, page, obj);
+    cache->frees++;
+    cache->active_objects--;
+
+    if (was_full && page->inuse < page->objects) {
+        remove_page_from_list(&cache->full_pages, page);
+        add_page_to_list(&cache->partial_pages, page);
     }
-    
-    if (!page) {
-        for (struct slub_page *p = cache->partial_pages; p; p = p->next) {
-            if ((u32)obj >= (u32)p->page_base && 
-                (u32)obj < (u32)p->page_base + (PAGE_SIZE << p->order)) {
-                page = p;
-                break;
-            }
-        }
-    }
-    
-    if (page) {
-        bool was_full = (page->inuse == page->objects);
-        
-        free_to_page(cache, page, obj);
-        cache->frees++;
-        cache->active_objects--;
-        
-        if (was_full && page->inuse < page->objects) {
-            remove_page_from_list(&cache->full_pages, page);
-            add_page_to_list(&cache->partial_pages, page);
-        }
-        
-        if (page->inuse == 0 && cache->total_pages > 1) {
-            remove_page_from_list(&cache->partial_pages, page);
-            free_slub_page(cache, page);
-        }
+
+    if (page->inuse == 0 && cache->total_pages > 1) {
+        remove_page_from_list(&cache->partial_pages, page);
+        free_slub_page(cache, page);
     }
 }
 
@@ -233,24 +209,26 @@ void SLUBAllocator::free(void *obj) {
     if (!obj) return;
     
     for (struct slub_cache *cache = cache_chain; cache; cache = cache->next) {
-        for (struct slub_page *page = cache->partial_pages; page; page = page->next) {
-            if ((u32)obj >= (u32)page->page_base && 
-                (u32)obj < (u32)page->page_base + (PAGE_SIZE << page->order)) {
-                cache_free(cache, obj);
-                return;
-            }
-        }
-        
-        for (struct slub_page *page = cache->full_pages; page; page = page->next) {
-            if ((u32)obj >= (u32)page->page_base && 
-                (u32)obj < (u32)page->page_base + (PAGE_SIZE << page->order)) {
-                cache_free(cache, obj);
-                return;
-            }
+        if (find_page(cache, obj)) {
+            cache_free(cache, obj);
+            return;
         }
     }
     
     buddy_allocator.free(obj);
+}
+
+struct slub_page *SLUBAllocator::find_page(struct slub_cache *cache, void *obj) {
+    struct slub_page *lists[] = {cache->partial_pages, cache->full_pages};
+    for (struct slub_page *list : lists) {
+        for (struct slub_page *page = list; page; page = page->next) {
+            u32 start = (u32)page->page_base;
+            u32 offset = (u32)obj - start;
+            if ((u32)obj >= start && offset < page->objects * cache->size &&
+                offset % cache->size == 0) return page;
+        }
+    }
+    return nullptr;
 }
 
 struct slub_page *SLUBAllocator::alloc_slub_page(struct slub_cache *cache) {

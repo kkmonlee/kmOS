@@ -115,7 +115,7 @@ private:
     bool should_switch_policy();
     void adjust_policy_for_workload();
     u32 calculate_fragmentation();
-    void *internal_alloc(u32 size, u32 flags, u32 preferred_allocator);
+    void *internal_alloc(u32 size, u32 &allocator);
     void internal_free(void *ptr, u32 allocator_hint);
 };
 
