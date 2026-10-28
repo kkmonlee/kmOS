@@ -15,6 +15,8 @@ enum
 class File
 {
 public:
+  static const u32 kMaxNameLength = 255;
+
   File(const char *n, u8 t);
   virtual ~File();
 
@@ -30,7 +32,7 @@ public:
 
   u32 addChild(File *n);
   File *createChild(const char *n, u8 t);
-  File *find(char *n);
+  File *find(const char *n);
   u32 mmap(u32 sizee, u32 flags, u32 offset, u32 prot);
 
   void setSize(u32 t);
@@ -40,7 +42,7 @@ public:
   void setNext(File *n);
   void setPrec(File *n);
   void setLink(File *n);
-  void setName(char *n);
+  void setName(const char *n);
 
   char *getName();
   File *getParent();
@@ -55,6 +57,8 @@ public:
   stat_fs stat();
 
 protected:
+  void detach();
+
   static u32 inode_system;
   char *map_memory;
   char *name;
@@ -63,6 +67,9 @@ protected:
   u32 inode;
   File *dev;
   File *link;
+  File *link_users;
+  File *link_next;
+  File *link_prec;
   File *master;
   File *parent;
   File *child;

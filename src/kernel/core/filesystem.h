@@ -10,6 +10,8 @@ class FilesystemDriver;
 class Filesystem
 {
 public:
+  static const u32 kMaxPathLength = 4096;
+
   Filesystem();
   ~Filesystem();
 
@@ -17,7 +19,8 @@ public:
   void mknod(const char *module, const char *name, u32 flag);
 
   File *path(const char *p);
-  File *path_parent(const char *p, char *fname);
+  File *path_parent(const char *p, char *fname, u32 size);
+  bool get_path(File *file, char *buffer, u32 size);
 
   u32 link(const char *fname, const char *newf);
   u32 addFile(const char *dir, File *fp);
@@ -30,6 +33,8 @@ public:
   File *getRoot();
 
 private:
+  File *resolve(const char *p, char *fname, u32 size);
+
   struct MountInfo {
     char path[128];
     FilesystemDriver *driver;

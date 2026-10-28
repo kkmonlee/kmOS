@@ -64,7 +64,7 @@ public:
   void reset_pinfo();
 
   File *getCurrentDir();
-  void setCurrentDir(File *f);
+  bool setCurrentDir(File *f);
   
   u64 get_total_runtime();
   u32 get_time_slice_count();

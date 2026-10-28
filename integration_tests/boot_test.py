@@ -90,10 +90,10 @@ class VM:
                              f"{self.errors.read_text()}")
 
     def serial_command(self, command):
-        count = self.text().count("kmOS:/$ ")
+        count = len(re.findall(r"^kmOS:[^\r\n]*\$ ", self.text(), re.MULTILINE))
         self.process.stdin.write((command + "\n").encode())
         self.process.stdin.flush()
-        return self.wait(lambda text: text.count("kmOS:/$ ") > count)
+        return self.wait(lambda text: len(re.findall(r"^kmOS:[^\r\n]*\$ ", text, re.MULTILINE)) > count)
 
     def close(self):
         if self.process.poll() is None:
@@ -154,9 +154,38 @@ def boot(args, ram, machine="pc"):
         assert "kernel_main" in text and "idle" in text, text
         for command in ("ls /dev", "ls /mnt", "ls /sys"):
             text = vm.serial_command(command)
+        navigation(vm)
+        text = vm.text()
         assert "[PANIC]" not in text, text
         assert "Invalid magic" not in text and "Invalid block" not in text, text
     print(f"PASS boot, paging, keyboard, serial and timer: {machine}, {ram} MB", flush=True)
+
+
+def navigation(vm):
+    cases = (
+        ("ls dev", "/", "Contents of dev:"),
+        ("cd sys/env", "/sys/env", None),
+        ("pwd", "/sys/env", "\n/sys/env\n"),
+        ("ls ..", "/sys/env", "env/"),
+        ("cd ../..", "/", None),
+        ("cd ../../..", "/", None),
+        ("cd //sys///env/./", "/sys/env", None),
+        ("cd missing", "/sys/env", "No such file or directory"),
+        ("cat missing", "/sys/env", "No such file or directory"),
+        ("ls /missing/child", "/sys/env", "No such file or directory"),
+        ("cd .", "/sys/env", None),
+        ("cd /dev/../sys/env/../../dev", "/dev", None),
+        ("pwd", "/dev", "\n/dev\n"),
+        ("cd", "/", None),
+        ("ls ///sys//env/../", "/", "env/"),
+        ("cd " + "n" * 256, "/", "No such file or directory"),
+    )
+    for command, directory, expected in cases:
+        start = len(vm.text())
+        text = vm.serial_command(command)[start:]
+        assert text.endswith(f"kmOS:{directory}$ "), text
+        if expected:
+            assert expected in text, text
 
 
 def paging(args, ram, module=None):
@@ -181,6 +210,16 @@ def heap(args, ram):
         assert "[HEAP] allocation, reuse, realloc and exhaustion verified" in text, text
         assert "[PANIC]" not in text and "Invalid magic" not in text and "Invalid block" not in text, text
     print(f"PASS heap ownership, reuse, realloc and exhaustion: {ram} MB", flush=True)
+
+
+def filesystem(args, ram):
+    with VM(args, f"filesystem-{ram}", ram, append="test=filesystem") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[FS] paths, working directories and lifetimes verified" in text, text
+        assert "filesystem read ok" in text, text
+        assert "[PANIC]" not in text and "Invalid magic" not in text and "Invalid block" not in text, text
+    print(f"PASS filesystem paths, working directories and lifetimes: {ram} MB", flush=True)
 
 
 def fault(args, case, vector, error, address=None, ram=64):
@@ -221,6 +260,7 @@ def main():
         boot(args, ram)
         paging(args, ram)
         heap(args, ram)
+        filesystem(args, ram)
     boot(args, 64, "q35")
     with tempfile.TemporaryDirectory(prefix="kmos-module-") as temp:
         module = Path(temp) / "module.bin"

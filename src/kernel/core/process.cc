@@ -46,7 +46,7 @@ Process::Process(char *n) : File(n, TYPE_PROCESS)
   state = SLEEPING;
   pparent = 0;
   pnext = 0;
-  cdir = 0;
+  cdir = arch.pcurrent ? arch.pcurrent->getCurrentDir() : fsm.getRoot();
   time_slice = 0;
   total_runtime = 0;
   last_scheduled = 0;
@@ -368,12 +368,15 @@ void Process::scan() {
 
 File *Process::getCurrentDir()
 {
-  return cdir;
+  return cdir ? cdir : fsm.getRoot();
 }
 
-void Process::setCurrentDir(File *f)
+bool Process::setCurrentDir(File *f)
 {
+  if (!f || f->getType() != TYPE_DIRECTORY)
+    return false;
   cdir = f;
+  return true;
 }
 
 void Process::setPNext(Process *p)

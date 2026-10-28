@@ -16,7 +16,6 @@ struct shell_command {
 };
 
 struct shell_state {
-    char current_directory[MAX_PATH_LENGTH];
     char command_buffer[MAX_COMMAND_LENGTH];
     char* command_history[MAX_HISTORY];
     int history_count;
@@ -62,7 +61,6 @@ public:
     void add_to_history(const char* command);
     void clear_screen();
     void print_file_info(File* file);
-    char* get_full_path(const char* path);
     
 private:
     struct shell_state state;
@@ -72,8 +70,7 @@ private:
     void init_commands();
     struct shell_command* find_command(const char* name);
     void trim_whitespace(char* str);
-    bool is_absolute_path(const char* path);
-    char* join_path(const char* dir, const char* file);
+    bool current_path(char *buffer, u32 size);
 };
 
 extern Shell shell;

@@ -54,7 +54,6 @@ static struct shell_command builtin_commands[] = {
 void Shell::init() {
     io.print("[SHELL] Initializing shell\n");
     
-    strcpy(state.current_directory, "/");
     memset(state.command_buffer, 0, MAX_COMMAND_LENGTH);
     state.history_count = 0;
     state.history_index = 0;
@@ -130,7 +129,8 @@ void Shell::print_banner() {
 }
 
 void Shell::print_prompt() {
-    io.print("kmOS:%s$ ", state.current_directory);
+    char path[MAX_PATH_LENGTH];
+    io.print("kmOS:%s$ ", current_path(path, sizeof(path)) ? path : "?");
 }
 
 int Shell::parse_command(const char* input, char** args) {
@@ -217,7 +217,12 @@ int Shell::cmd_clear(int argc, char** argv) {
 }
 
 int Shell::cmd_ls(int argc, char** argv) {
-    const char* path = (argc > 1) ? argv[1] : state.current_directory;
+    char current[MAX_PATH_LENGTH];
+    if (argc < 2 && !current_path(current, sizeof(current))) {
+        io.print("ls: cannot resolve current directory\n");
+        return 1;
+    }
+    const char* path = (argc > 1) ? argv[1] : current;
     File* dir = fsm.path(path);
 
     if (!dir) {
@@ -249,43 +254,37 @@ int Shell::cmd_ls(int argc, char** argv) {
 }
 
 int Shell::cmd_cd(int argc, char** argv) {
-    if (argc < 2) {
-        strcpy(state.current_directory, "/");
-        return 0;
+    if (argc > 2) {
+        io.print("Usage: cd [directory]\n");
+        return 1;
     }
-    
-    const char* new_dir = argv[1];
-    
-    if (strcmp(new_dir, "..") == 0) {
-        char* last_slash = strrchr(state.current_directory, '/');
-        if (last_slash && last_slash != state.current_directory) {
-            *last_slash = '\0';
-        } else {
-            strcpy(state.current_directory, "/");
-        }
-    } else if (strcmp(new_dir, ".") == 0) {
-        return 0;
-    } else {
-        char* full_path = get_full_path(new_dir);
-        if (full_path) {
-            File* dir = fsm.path(full_path);
-            if (dir) {
-                strcpy(state.current_directory, full_path);
-            } else {
-                io.print("cd: %s: No such file or directory\n", new_dir);
-                kfree(full_path);
-                return 1;
-            }
-            kfree(full_path);
-        }
+    const char *target = argc > 1 ? argv[1] : "/";
+    File *dir = fsm.path(target);
+    if (!dir) {
+        io.print("cd: %s: No such file or directory\n", target);
+        return 1;
     }
-    
+    if (dir->getType() != TYPE_DIRECTORY) {
+        io.print("cd: %s: Not a directory\n", target);
+        return 1;
+    }
+    char path[MAX_PATH_LENGTH];
+    if (!fsm.get_path(dir, path, sizeof(path))) {
+        io.print("cd: path too long\n");
+        return 1;
+    }
+    if (!arch.pcurrent || !arch.pcurrent->setCurrentDir(dir)) return 1;
     return 0;
 }
 
 int Shell::cmd_pwd(int argc, char** argv) {
     (void)argc; (void)argv;
-    io.print("%s\n", state.current_directory);
+    char path[MAX_PATH_LENGTH];
+    if (!current_path(path, sizeof(path))) {
+        io.print("pwd: cannot resolve current directory\n");
+        return 1;
+    }
+    io.print("%s\n", path);
     return 0;
 }
 
@@ -295,14 +294,7 @@ int Shell::cmd_cat(int argc, char** argv) {
         return 1;
     }
 
-    char* full_path = get_full_path(argv[1]);
-    if (!full_path) {
-        io.print("cat: memory allocation failed\n");
-        return 1;
-    }
-
-    File* file = fsm.path(full_path);
-    kfree(full_path);
+    File* file = fsm.path(argv[1]);
 
     if (!file) {
         io.print("cat: %s: No such file or directory\n", argv[1]);
@@ -336,6 +328,11 @@ int Shell::cmd_cat(int argc, char** argv) {
         u32 read = file->read(offset, buffer, to_read);
         if (read == 0)
             break;
+        if (read > to_read) {
+            io.print("\ncat: unable to read '%s'\n", argv[1]);
+            kfree(buffer);
+            return 1;
+        }
 
         for (u32 i = 0; i < read; ++i) {
             io.putc((char)buffer[i]);
@@ -599,37 +596,9 @@ void Shell::add_to_history(const char* command) {
     }
 }
 
-char* Shell::get_full_path(const char* path) {
-    if (is_absolute_path(path)) {
-        char* result = (char*)kmalloc(strlen(path) + 1);
-        if (result) {
-            strcpy(result, path);
-        }
-        return result;
-    } else {
-        return join_path(state.current_directory, path);
-    }
-}
-
-bool Shell::is_absolute_path(const char* path) {
-    return path && path[0] == '/';
-}
-
-char* Shell::join_path(const char* dir, const char* file) {
-    int dir_len = strlen(dir);
-    int file_len = strlen(file);
-    int total_len = dir_len + file_len + 2;
-    
-    char* result = (char*)kmalloc(total_len);
-    if (!result) return nullptr;
-    
-    strcpy(result, dir);
-    if (dir_len > 0 && dir[dir_len - 1] != '/') {
-        strcat(result, "/");
-    }
-    strcat(result, file);
-    
-    return result;
+bool Shell::current_path(char *buffer, u32 size) {
+    File *dir = arch.pcurrent ? arch.pcurrent->getCurrentDir() : fsm.getRoot();
+    return fsm.get_path(dir, buffer, size);
 }
 
 void Shell::exit(int code) {

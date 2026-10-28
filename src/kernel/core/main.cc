@@ -18,6 +18,7 @@ Filesystem fsm;
 Syscalls syscall;
 
 void run_boot_test(const multiboot_info *boot);
+void run_filesystem_test(const multiboot_info *boot);
 
 extern "C" void kmain(u32 magic, const multiboot_info *boot) {
     serial::init();
@@ -36,11 +37,12 @@ extern "C" void kmain(u32 magic, const multiboot_info *boot) {
     arch.init(boot);
     run_boot_test(boot);
 
+    fsm.init();
+    fsm.register_driver(&ext2_driver);
     Process *kernel_process = new Process(const_cast<char *>("kernel_main"));
     kernel_process->setPParent(nullptr);
     arch.addProcess(kernel_process);
-    fsm.init();
-    fsm.register_driver(&ext2_driver);
+    run_filesystem_test(boot);
     keyboard.init();
     pit.init(100);
     arch.configure_scheduler(pit.get_frequency());

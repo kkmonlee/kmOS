@@ -27,6 +27,11 @@ void call_open()
   }
 
   File *fp = fsm.path(name);
+  if (!fp)
+  {
+    arch.setRet((u32)-1);
+    return;
+  }
   fp->open(flag);
   u32 fd = p->addFile(fp, flag);
 
@@ -294,13 +299,12 @@ void call_chdir()
 
   Process *p = arch.pcurrent;
   File *f = fsm.path(n);
-  if (f == NULL)
+  if (!p || !f || !p->setCurrentDir(f))
   {
     arch.setRet((u32)-1);
     return;
   }
 
-  p->setCurrentDir(f);
   arch.setRet((u32)1);
   return;
 }

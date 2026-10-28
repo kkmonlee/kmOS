@@ -5,11 +5,18 @@
 extern "C" char kernel_end, text_start;
 extern "C" u32 get_page_fault_count();
 bool verify_heap();
+bool verify_filesystem();
 
 static void finish(bool passed) {
     serial::write(passed ? "[TEST] passed\n" : "[TEST] failed\n");
     asm volatile("outl %0, %1" :: "a"(passed ? 0x10U : 0x11U), "Nd"((u16)0xf4));
     for (;;) asm volatile("cli; hlt");
+}
+
+void run_filesystem_test(const multiboot_info *boot) {
+    if (!(boot->flags & 4) || !boot->cmdline || boot->cmdline > USER_OFFSET - 4096) return;
+    if (boot_has_argument((const char *)boot->cmdline, "test=filesystem"))
+        finish(verify_filesystem());
 }
 
 static u32 module_hash(const multiboot_info *boot) {

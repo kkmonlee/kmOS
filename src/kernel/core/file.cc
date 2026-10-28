@@ -39,9 +39,8 @@ u32 File::inode_system = 0;
 
 File::File(const char *n, u8 t)
 {
-  name = (char *)kmalloc(strlen(n) + 1);
-  memset(name, 0, strlen(n) + 1);
-  memcpy(name, n, strlen(n));
+  name = n ? (char *)kmalloc(strlen(n) + 1) : nullptr;
+  if (name) memcpy(name, n, strlen(n) + 1);
 
   checkName();
   master = arch.pcurrent;
@@ -49,36 +48,26 @@ File::File(const char *n, u8 t)
   size = 0;
   type = t;
   parent = child = next = prec = link = NULL;
+  link_users = link_next = link_prec = nullptr;
   map_memory = NULL;
 }
 
 File::~File()
 {
+  setLink(nullptr);
+  while (link_users) link_users->setLink(nullptr);
+  detach();
+
+  while (child) delete child;
   kfree(name);
+}
 
-  if (prec == NULL)
-  {
-    parent->setChild(next);
-    if (next)
-      next->setPrec(NULL);
-  }
-  else if (next == NULL)
-  {
-    prec->setNext(NULL);
-  }
-  else
-  {
-    prec->setNext(next);
-    next->setPrec(prec);
-  }
-
-  File *n = child;
-  while (n != NULL)
-  {
-    File *nextChild = n->getNext();
-    delete n;
-    n = nextChild;
-  }
+void File::detach()
+{
+  if (prec) prec->next = next;
+  else if (parent) parent->child = next;
+  if (next) next->prec = prec;
+  parent = next = prec = nullptr;
 }
 
 #define CHAR_REPLACEMENT '_'
@@ -102,7 +91,17 @@ u32 File::addChild(File *n)
 {
   if (!n)
     return PARAM_NULL;
+  if (type != TYPE_DIRECTORY || !n->name || !*n->name)
+    return ERROR_PARAM;
+  for (File *ancestor = this; ancestor; ancestor = ancestor->parent)
+  {
+    if (ancestor == n) return ERROR_PARAM;
+  }
+  File *existing = find(n->name);
+  if (existing && existing != n) return ERROR_PARAM;
+  if (n->parent == this) return RETURN_OK;
 
+  n->detach();
   n->setParent(this);
   n->setPrec(NULL);
   n->setNext(child);
@@ -118,8 +117,18 @@ u32 File::addChild(File *n)
  */
 File *File::createChild(const char *n, u8 t)
 {
+  if (!n || !*n || strlen(n) > (int)kMaxNameLength ||
+      !strcmp(n, ".") || !strcmp(n, "..")) return nullptr;
+  for (const char *p = n; *p; ++p)
+  {
+    if (*p == '/') return nullptr;
+  }
   File *newFile = new File(n, t);
-  addChild(newFile);
+  if (!newFile || addChild(newFile) != RETURN_OK)
+  {
+    delete newFile;
+    return nullptr;
+  }
   return newFile;
 }
 
@@ -136,7 +145,21 @@ char *File::getName() { return name; }
 void File::setType(u8 t) { type = t; }
 void File::setSize(u32 t) { size = t; }
 void File::setParent(File *n) { parent = n; }
-void File::setLink(File *n) { link = n; }
+void File::setLink(File *n)
+{
+  if (link == n) return;
+  if (link)
+  {
+    if (link_prec) link_prec->link_next = link_next;
+    else link->link_users = link_next;
+    if (link_next) link_next->link_prec = link_prec;
+  }
+  link = n;
+  link_prec = nullptr;
+  link_next = n ? n->link_users : nullptr;
+  if (link_next) link_next->link_prec = this;
+  if (n) n->link_users = this;
+}
 void File::setChild(File *n) { child = n; }
 void File::setNext(File *n) { next = n; }
 void File::setPrec(File *n) { prec = n; }
@@ -144,19 +167,23 @@ void File::setPrec(File *n) { prec = n; }
 /**
  * Sets a new name for the file, ensuring it complies with naming rules.
  */
-void File::setName(char *n)
+void File::setName(const char *n)
 {
+  if (!n || !*n || strlen(n) > (int)kMaxNameLength) return;
+  char *replacement = (char *)kmalloc(strlen(n) + 1);
+  if (!replacement) return;
+  memcpy(replacement, n, strlen(n) + 1);
   kfree(name);
-  name = (char *)kmalloc(strlen(n) + 1);
-  memcpy(name, n, strlen(n) + 1);
+  name = replacement;
   checkName();
 }
 
 /**
  * Finds a child file/directory by name.
  */
-File *File::find(char *n)
+File *File::find(const char *n)
 {
+  if (!n) return nullptr;
   File *fp = child;
   while (fp != NULL)
   {

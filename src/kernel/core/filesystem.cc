@@ -59,70 +59,107 @@ File *Filesystem::getRoot()
 
 File *Filesystem::path(const char *p)
 {
-  if (!p)
-    return NULL;
+  return resolve(p, nullptr, 0);
+}
+
+File *Filesystem::resolve(const char *p, char *fname, u32 size)
+{
+  if (fname && size) fname[0] = '\0';
+  if (!p || !*p || !root) return nullptr;
+
+  u32 length = 0;
+  while (p[length])
+  {
+    if (++length >= kMaxPathLength) return nullptr;
+  }
 
   File *fp = root;
-  char *name = NULL;
-  const char *beg_p = p;
-  const char *end_p = beg_p;
-
-  if (p[0] != '/' && arch.pcurrent != NULL)
+  if (*p != '/' && arch.pcurrent)
   {
-    fp = arch.pcurrent->getCurrentDir();
+    File *current = arch.pcurrent->getCurrentDir();
+    if (current) fp = current;
   }
 
-  while (*beg_p == '/')
-    beg_p++;
-  end_p++;
-
-  while (*beg_p != '\0')
+  u32 links = 0;
+  while (*p)
   {
-    if (fp->getType() != TYPE_DIRECTORY)
-      return NULL;
+    if (!fp || fp->getType() != TYPE_DIRECTORY) return nullptr;
+    while (*p == '/') ++p;
+    if (!*p) break;
 
-    while (*end_p != '\0' && *end_p != '/')
-      end_p++;
-
-    name = (char *)kmalloc(end_p - beg_p + 1);
-    memcpy(name, beg_p, end_p - beg_p);
-    name[end_p - beg_p] = '\0';
-
-    if (strcmp("..", name) == 0)
+    char name[File::kMaxNameLength + 1];
+    u32 count = 0;
+    while (*p && *p != '/')
     {
-      fp = fp->getParent();
+      if (count == File::kMaxNameLength) return nullptr;
+      name[count++] = *p++;
     }
-    else if (strcmp(".", name) != 0)
+    name[count] = '\0';
+
+    const char *remaining = p;
+    while (*remaining == '/') ++remaining;
+    if (fname && !*remaining)
+    {
+      if (*p || count + 1 > size || !strcmp(name, ".") || !strcmp(name, ".."))
+        return nullptr;
+      memcpy(fname, name, count + 1);
+      return fp;
+    }
+
+    if (!strcmp(name, ".."))
+    {
+      if (fp != root && fp->getParent()) fp = fp->getParent();
+    }
+    else if (strcmp(name, "."))
     {
       fp->scan();
-      File *found = fp->find(name);
-      kfree(name);
-
-      if (!found)
-        return NULL;
-
-      if (found->getType() == TYPE_LINK && found->getLink() != NULL)
+      fp = fp->find(name);
+      while (fp && fp->getType() == TYPE_LINK)
       {
-        fp = found->getLink();
+        if (++links > 32) return nullptr;
+        fp = fp->getLink();
       }
-      else
-      {
-        fp = found;
-      }
+      if (!fp) return nullptr;
     }
-
-    beg_p = end_p;
-    while (*beg_p == '/')
-      beg_p++;
-    end_p++;
   }
 
-  return fp;
+  return fname ? nullptr : fp;
+}
+
+bool Filesystem::get_path(File *file, char *buffer, u32 size)
+{
+  if (!buffer || !size) return false;
+  buffer[0] = '\0';
+  if (!file || !root || size < 2) return false;
+
+  u32 position = size - 1;
+  buffer[position] = '\0';
+  while (file != root)
+  {
+    if (!file || !file->getName())
+    {
+      buffer[0] = '\0';
+      return false;
+    }
+    u32 length = strlen(file->getName());
+    if (!length || length > File::kMaxNameLength || length + 1 > position)
+    {
+      buffer[0] = '\0';
+      return false;
+    }
+    position -= length;
+    memcpy(buffer + position, file->getName(), length);
+    buffer[--position] = '/';
+    file = file->getParent();
+  }
+  if (position == size - 1) buffer[--position] = '/';
+  for (u32 i = position; i < size; ++i) buffer[i - position] = buffer[i];
+  return true;
 }
 
 File *Filesystem::pivot_root(File *targetdir)
 {
-  if (!targetdir)
+  if (!targetdir || targetdir->getType() != TYPE_DIRECTORY)
     return root;
 
   File *newRoot = new File("/", TYPE_DIRECTORY);
@@ -130,79 +167,41 @@ File *Filesystem::pivot_root(File *targetdir)
   File *child = targetdir->getChild();
   while (child)
   {
+    File *next = child->getNext();
     newRoot->addChild(child);
-    child = child->getNext();
+    child = next;
   }
 
   return newRoot;
 }
 
-File *Filesystem::path_parent(const char *p, char *fname)
+File *Filesystem::path_parent(const char *p, char *fname, u32 size)
 {
-  if (!p)
-    return NULL;
-
-  File *fp = root;
-  char *name = NULL;
-  const char *beg_p = p;
-  const char *end_p = beg_p;
-
-  while (*beg_p == '/')
-    beg_p++;
-  end_p++;
-
-  while (*beg_p != '\0')
-  {
-    if (fp->getType() != TYPE_DIRECTORY)
-      return NULL;
-
-    while (*end_p != '\0' && *end_p != '/')
-      end_p++;
-
-    name = (char *)kmalloc(end_p - beg_p + 1);
-    memcpy(name, beg_p, end_p - beg_p);
-    name[end_p - beg_p] = '\0';
-
-    if (strcmp("..", name) == 0)
-    {
-      fp = fp->getParent();
-    }
-    else if (strcmp(".", name) != 0)
-    {
-      File *found = fp->find(name);
-      kfree(name);
-
-      if (!found)
-      {
-        strcpy(fname, name);
-        return fp;
-      }
-
-      fp = found->getType() == TYPE_LINK && found->getLink() ? found->getLink() : found;
-    }
-
-    beg_p = end_p;
-    while (*beg_p == '/')
-      beg_p++;
-    end_p++;
-  }
-
-  return fp;
+  if (!fname || !size) return nullptr;
+  return resolve(p, fname, size);
 }
 
 u32 Filesystem::link(const char *fname, const char *newf)
 {
-  File *tolink = path(fname);
-  if (!tolink)
-    return -1;
+  File *target = path(fname);
+  if (!target) return ERROR_PARAM;
 
-  char *nname = (char *)kmalloc(255);
-  File *parent = path_parent(newf, nname);
-  File *linkFile = new File(nname, TYPE_LINK);
-  linkFile->setLink(tolink);
-  parent->addChild(linkFile);
+  char name[File::kMaxNameLength + 1];
+  File *parent = path_parent(newf, name, sizeof(name));
+  if (!parent) return ERROR_PARAM;
+  parent->scan();
+  if (parent->find(name)) return ERROR_PARAM;
 
-  return RETURN_OK;
+  File *node = new File(name, TYPE_LINK);
+  if (!node || !node->getName())
+  {
+    delete node;
+    return ERROR_MEMORY;
+  }
+  node->setLink(target);
+  u32 result = parent->addChild(node);
+  if (result != RETURN_OK) delete node;
+  return result;
 }
 
 u32 Filesystem::addFile(const char *dir, File *fp)
