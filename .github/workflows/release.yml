@@ -13,6 +13,8 @@ on:
 permissions:
   contents: read
 
+cache-mode: none
+
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
@@ -42,6 +44,7 @@ jobs:
 
   build:
     needs: validate
+    cache-mode: write
     uses: ./.github/workflows/ci.yml
     with:
       release: true
