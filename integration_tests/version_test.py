@@ -115,6 +115,23 @@ class VersionTest(unittest.TestCase):
         metadata = json.loads(header.with_suffix(".json").read_text())
         self.assertEqual(metadata, self.info())
 
+    def test_ci_checkout_can_restore_annotated_tag(self):
+        self.tag()
+        with tempfile.TemporaryDirectory(prefix="kmos-checkout-") as target:
+            checkout = Path(target) / "repo"
+            subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(self.root), str(checkout)],
+                           check=True, capture_output=True)
+            command = [sys.executable, str(checkout / "scripts/version.py"), "--check-release", "v0.2.0"]
+            subprocess.run(["git", "-C", str(checkout), "update-ref", "refs/tags/v0.2.0", "HEAD"], check=True)
+            rejected = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("annotated tag", rejected.stderr)
+            subprocess.run(["git", "-C", str(checkout), "fetch", "--force", "--no-tags", "origin",
+                            "refs/tags/v0.2.0:refs/tags/v0.2.0"], check=True, capture_output=True)
+            restored = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+            self.assertEqual(restored.stdout.strip(), "0.2.0")
+
     def test_version_format(self):
         for value in ("1.0", "01.2.0", "0.02.0", "0.2.00", "v0.2.0", "0.2.0-dev", "1;echo bad", ""):
             with self.subTest(value=value):

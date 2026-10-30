@@ -3,12 +3,18 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -16,22 +22,30 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        ref: ${{ inputs.tag || github.ref }}
+    - name: Fetch release tag
+      env:
+        RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      run: git fetch --force --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
     - id: version
       env:
-        RELEASE_TAG: ${{ github.ref_name }}
+        RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       run: |
         version=$(python3 scripts/version.py --check-release "$RELEASE_TAG")
         echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   build:
     needs: validate
     uses: ./.github/workflows/ci.yml
     with:
       release: true
+      ref: ${{ needs.validate.outputs.tag }}
 
   publish:
     needs: [validate, build]
@@ -50,7 +64,7 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
-        RELEASE_TAG: ${{ github.ref_name }}
+        RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         RELEASE_VERSION: ${{ needs.validate.outputs.version }}
       run: |
         revision=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["revision"])' "dist/kmos-$RELEASE_VERSION-build.json")
