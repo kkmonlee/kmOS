@@ -34,7 +34,8 @@ struct page_table_entry {
     u32 pat : 1;
     u32 global : 1;
     u32 swapped : 1;
-    u32 available : 2;
+    u32 cow : 1;
+    u32 available : 1;
     u32 frame : 20;
 } __attribute__((packed));
 
@@ -74,6 +75,8 @@ public:
     void switch_page_directory(struct page_directory *pd);
     u32 alloc_frame();
     void free_frame(u32 frame_addr);
+    bool retain_frame(u32 frame_addr);
+    u32 frame_references(u32 frame_addr);
     bool verify_page_tables();
     u32 heap_start;
     u32 heap_size;

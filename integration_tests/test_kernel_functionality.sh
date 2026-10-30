@@ -142,9 +142,9 @@ test_cow_symbols() {
         "cow_handle_page_fault"
         "cow_cleanup_process"
         "init_cow_manager"
-        "break_cow"
-        "alloc_cow_page"
-        "free_cow_page"
+        "cow_copy_page_range"
+        "retain_frame"
+        "frame_references"
     )
     
     local found_symbols=0

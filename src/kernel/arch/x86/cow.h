@@ -5,26 +5,6 @@
 #include <runtime/list.h>
 #include <vmm.h>
 
-#define COW_MAGIC 0xC0BABE1
-#define MAX_COW_REFS 65536
-
-struct cow_page {
-    u32 physical_addr;
-    u32 ref_count;
-    u32 magic;
-    struct cow_page *next;
-    struct cow_page *prev;
-};
-
-struct cow_mapping {
-    u32 virtual_addr;
-    u32 size;
-    u32 flags;
-    struct page_directory *owner_pd;
-    struct cow_page *cow_page;
-    struct cow_mapping *next;
-};
-
 struct vm_area {
     u32 vm_start;
     u32 vm_end;
@@ -64,25 +44,6 @@ public:
     int validate_cow_integrity();
     void print_stats();
     
-private:
-    struct cow_page *cow_pages;
-    struct cow_mapping *cow_mappings;
-    u32 total_cow_pages;
-    u32 total_cow_mappings;
-    
-    struct cow_page *alloc_cow_page(u32 physical_addr);
-    void free_cow_page(struct cow_page *page);
-    struct cow_page *find_cow_page(u32 physical_addr);
-    int copy_page_cow(struct page_directory *dst_pd, struct page_directory *src_pd,
-                      u32 virtual_addr);
-    int break_cow(struct page_directory *pd, u32 virtual_addr);
-    void inc_cow_ref(struct cow_page *page);
-    void dec_cow_ref(struct cow_page *page);
-    
-    struct cow_mapping *create_cow_mapping(u32 virtual_addr, u32 size, u32 flags,
-                                          struct page_directory *pd, struct cow_page *page);
-    void destroy_cow_mapping(struct cow_mapping *mapping);
-    struct cow_mapping *find_cow_mapping(struct page_directory *pd, u32 virtual_addr);
 };
 
 extern COWManager cow_manager;

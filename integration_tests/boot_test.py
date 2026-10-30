@@ -222,6 +222,15 @@ def filesystem(args, ram):
     print(f"PASS filesystem paths, working directories and lifetimes: {ram} MB", flush=True)
 
 
+def cow(args, ram):
+    with VM(args, f"cow-{ram}", ram, append="test=cow") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[COW] ownership, isolation, rollback and cleanup verified" in text, text
+        assert "[PANIC]" not in text and "Invalid magic" not in text and "Invalid block" not in text, text
+    print(f"PASS COW ownership, isolation, rollback and cleanup: {ram} MB", flush=True)
+
+
 def fault(args, case, vector, error, address=None, ram=64):
     with VM(args, f"fault-{case}", ram, append=f"test={case}") as vm:
         vm.wait(lambda text: "[PANIC]" in text and "\n" in text.split("[PANIC]", 1)[1])
@@ -261,6 +270,7 @@ def main():
         paging(args, ram)
         heap(args, ram)
         filesystem(args, ram)
+        cow(args, ram)
     boot(args, 64, "q35")
     with tempfile.TemporaryDirectory(prefix="kmos-module-") as temp:
         module = Path(temp) / "module.bin"

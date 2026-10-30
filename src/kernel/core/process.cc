@@ -18,7 +18,6 @@ extern "C" {
 struct page_directory;
 extern "C" {
   int cow_fork_mm(page_directory *child_pd, page_directory *parent_pd);
-  void cow_cleanup_process(struct page_directory *pd);
 }
 
 extern Architecture arch;
@@ -31,7 +30,6 @@ u32 Process::proc_pid = 0;
 Process::~Process()
 {
   if (info.pd) {
-    cow_cleanup_process(info.pd);
     vmm.destroy_page_directory(info.pd);
   }
   

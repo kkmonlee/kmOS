@@ -8,6 +8,7 @@ public:
     static constexpr u32 FRAME_BYTES = 4096;
     static constexpr u32 LIMIT = 0x40000000;
     static constexpr u32 MAX_FRAMES = LIMIT / FRAME_BYTES;
+    static constexpr u32 MAX_REFERENCES = 65536;
 
     void reset() {
         count_ = 0;
@@ -17,6 +18,7 @@ public:
             used_[i] = ~0U;
             usable_[i] = 0;
         }
+        for (u32 i = 0; i < MAX_FRAMES; ++i) references_[i] = 0;
     }
 
     void add_usable(u64 start, u64 length) {
@@ -45,6 +47,7 @@ public:
             if (!(used_[i / 32] & mask)) --free_;
             used_[i / 32] |= mask;
             usable_[i / 32] &= ~mask;
+            references_[i] = 0;
         }
     }
 
@@ -59,7 +62,10 @@ public:
                 if (first_free == count_) first_free = i;
                 if (++run != pages) continue;
                 u32 first = i + 1 - pages;
-                for (u32 j = first; j <= i; ++j) used_[j / 32] |= 1U << (j % 32);
+                for (u32 j = first; j <= i; ++j) {
+                    used_[j / 32] |= 1U << (j % 32);
+                    references_[j] = 1;
+                }
                 free_ -= pages;
                 next_ = first_free == first ? i + 1 : first_free;
                 return first * FRAME_BYTES;
@@ -71,12 +77,24 @@ public:
     void release(u32 address) {
         if (!is_usable(address)) return;
         u32 index = address / FRAME_BYTES;
+        if (!references_[index] || --references_[index]) return;
         u32 mask = 1U << (index % 32);
         if (used_[index / 32] & mask) {
             used_[index / 32] &= ~mask;
             ++free_;
             if (index < next_) next_ = index;
         }
+    }
+
+    bool retain(u32 address) {
+        u32 count = references(address);
+        if (!count || count == MAX_REFERENCES) return false;
+        ++references_[address / FRAME_BYTES];
+        return true;
+    }
+
+    u32 references(u32 address) const {
+        return is_usable(address) ? references_[address / FRAME_BYTES] : 0;
     }
 
     bool is_usable(u32 address) const {
@@ -97,6 +115,7 @@ public:
 private:
     u32 used_[MAX_FRAMES / 32];
     u32 usable_[MAX_FRAMES / 32];
+    u32 references_[MAX_FRAMES];
     u32 count_;
     u32 free_;
     u32 next_;

@@ -136,6 +136,20 @@ void VMM::free_frame(u32 address) {
     irq_restore(flags);
 }
 
+bool VMM::retain_frame(u32 address) {
+    u32 flags = irq_save();
+    bool retained = physical_memory.retain(address);
+    irq_restore(flags);
+    return retained;
+}
+
+u32 VMM::frame_references(u32 address) {
+    u32 flags = irq_save();
+    u32 count = physical_memory.references(address);
+    irq_restore(flags);
+    return count;
+}
+
 bool VMM::init_physical_memory(const multiboot_info *boot) {
     if (!boot || (u32)boot > PhysicalMemory::LIMIT - sizeof(*boot)) return false;
     physical_memory.reset();
@@ -213,6 +227,7 @@ page_table_entry *VMM::get_page_table(page_directory *pd, u32 address, int creat
 int VMM::map_page(page_directory *pd, u32 address, u32 physical, u32 flags) {
     if ((address | physical) & (FRAME_SIZE - 1)) return -1;
     if ((flags & PG_USER) && (address < USER_OFFSET || address >= USER_STACK)) return -1;
+    if ((flags & PG_COW) && (!(flags & PG_USER) || !(flags & PG_PRESENT) || (flags & PG_WRITE))) return -1;
     page_table_entry *table = get_page_table(pd, address, 1);
     if (!table) return -1;
     u32 index = VADDR_PT_OFFSET(address);
@@ -221,6 +236,7 @@ int VMM::map_page(page_directory *pd, u32 address, u32 physical, u32 flags) {
     table[index].present = (flags & PG_PRESENT) != 0;
     table[index].writable = (flags & PG_WRITE) != 0;
     table[index].user = (flags & PG_USER) != 0;
+    table[index].cow = (flags & PG_COW) != 0;
     if (flags & PG_USER) pd->tables[VADDR_PD_OFFSET(address)].user = 1;
     if (pd == current_directory) invalidate_page(address);
     return 0;

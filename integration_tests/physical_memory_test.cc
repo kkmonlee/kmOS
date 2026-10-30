@@ -45,6 +45,30 @@ int main() {
     memory.release(PhysicalMemory::LIMIT);
     CHECK(memory.free_pages() == 0);
 
+    memory.reset();
+    memory.add_usable(4096, 3 * 4096);
+    CHECK(!memory.retain(4096) && !memory.retain(0));
+    CHECK(memory.allocate(3) == 4096);
+    CHECK(memory.references(4096) == 1 && memory.references(8192) == 1);
+    CHECK(memory.retain(8192) && !memory.retain(8193));
+    memory.release(4096);
+    memory.release(8192);
+    memory.release(12288);
+    CHECK(memory.free_pages() == 2 && memory.references(8192) == 1);
+    memory.release(8192);
+    CHECK(memory.free_pages() == 3 && !memory.references(8192));
+    CHECK(memory.allocate() == 4096);
+    for (u32 i = 1; i < PhysicalMemory::MAX_REFERENCES; ++i) CHECK(memory.retain(4096));
+    CHECK(memory.references(4096) == PhysicalMemory::MAX_REFERENCES);
+    CHECK(!memory.retain(4096) && memory.free_pages() == 2);
+    for (u32 i = 1; i < PhysicalMemory::MAX_REFERENCES; ++i) memory.release(4096);
+    CHECK(memory.references(4096) == 1 && memory.free_pages() == 2);
+    memory.release(4096);
+    memory.release(4096);
+    CHECK(memory.free_pages() == 3 && !memory.references(~0U));
+    memory.reserve(4096, 4096);
+    CHECK(!memory.retain(4096) && !memory.references(4096));
+
     struct {
         multiboot_mmap_entry first;
         u32 extension;
