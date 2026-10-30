@@ -519,7 +519,8 @@ int Shell::cmd_fetch(int argc, char** argv) {
     io.print("%s  Display: VGA 80x25\n", kmos_logo[9]);
     io.print("%s  Built: %s\n", kmos_logo[10], KERNEL_DATE);
     io.print("%s  License: %s\n", kmos_logo[11], KERNEL_LICENCE);
-    for (u32 i = 12; i < sizeof(kmos_logo) / sizeof(kmos_logo[0]); ++i) io.print("%s\n", kmos_logo[i]);
+    io.print("%s  Commit: %s\n", kmos_logo[12], KERNEL_REVISION);
+    for (u32 i = 13; i < sizeof(kmos_logo) / sizeof(kmos_logo[0]); ++i) io.print("%s\n", kmos_logo[i]);
     io.print("\n");
     return 0;
 }

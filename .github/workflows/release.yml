@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - id: version
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: |
+        version=$(python3 scripts/version.py --check-release "$RELEASE_TAG")
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      release: true
+
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: release-files
+        path: dist
+    - name: Verify checksums
+      working-directory: dist
+      run: sha256sum --check SHA256SUMS
+    - name: Publish release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RELEASE_TAG: ${{ github.ref_name }}
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      run: |
+        revision=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["revision"])' "dist/kmos-$RELEASE_VERSION-build.json")
+        remote_revision=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq '.sha')
+        test "$revision" = "$remote_revision"
+        gh release create "$RELEASE_TAG" dist/* \
+          --verify-tag --fail-on-no-commits --generate-notes \
+          --title "kmOS $RELEASE_VERSION"

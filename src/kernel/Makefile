@@ -19,6 +19,13 @@ PLATFORMS= `find ./arch/ -type d | sed "s/.*\///" | sort`
 
 all: $(KERNEL)
 
+.PHONY: all clean FORCE
+
+generated/version.h: FORCE ../../VERSION ../../scripts/version.py
+	python3 ../../scripts/version.py --header $@
+
+FORCE:
+
 $(KERNEL): $(OBJS) arch/$(ARCH)/linker.ld
 	$(LD) $(LDFLAG) -o $@ $(OBJS)
 	@mkdir -p $(SDKDIR)/bootdisk/
@@ -71,10 +78,11 @@ arch/$(ARCH)/x86int_asm.o: arch/$(ARCH)/x86int.asm
 
 clean:
 	rm -f $(OBJS) $(OBJS:.o=.d) $(KERNEL) dasm.txt
+	rm -f generated/version.h generated/version.json
 	
 	
 
 
 -include $(OBJS:.o=.d)
 
-$(OBJS): arch/$(ARCH)/config.make
+$(OBJS): arch/$(ARCH)/config.make generated/version.h

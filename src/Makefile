@@ -15,7 +15,7 @@ all:
 	make -C ./userland
 
 build:
-	zip -r kmos-$(VERSION).zip ./
+	$(MAKE) -C .. release
 
 run:
 	@echo "Running kmOS in GUI mode"

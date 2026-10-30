@@ -119,6 +119,9 @@ security_issues.txt
 size_history.csv
 
 # Build artifacts
+/src/kernel/generated/
+/dist/
+__pycache__/
 c.img
 test.iso
 

@@ -1,8 +1,9 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <generated/version.h>
+
 #define KERNEL_NAME         "kmOS"
-#define KERNEL_VERSION      "1.0"
 #define KERNEL_DATE         __DATE__
 #define KERNEL_TIME         __TIME__
 #define KERNEL_LICENCE      "Apache License"

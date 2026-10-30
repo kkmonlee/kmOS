@@ -35,6 +35,7 @@ kernel shell. No disk image or root access is needed.
 | `make test` | Run memory and QEMU integration tests |
 | `make iso` | Build a bootable GRUB ISO |
 | `make test-iso` | Build and test the GRUB ISO |
+| `make version` | Show the version and build identity |
 
 ISO builds need GRUB and xorriso, or a running Docker/OrbStack installation.
 
@@ -65,6 +66,36 @@ and user faults terminate the process. The supported syscall wrappers are in
 Only the first 1 GB of RAM is managed. The interactive shell runs in kernel
 space, and boot-module files are read-only.
 
+## Versions
+
+[VERSION](VERSION) holds the next release number. Development builds include
+the commit, such as `0.2.0-dev+g8d9219716c09`, with `.dirty` for local changes.
+A clean build at the annotated tag `v0.2.0` reports `0.2.0`.
+
+Use patch releases for fixes and minor releases for development milestones.
+The syscall ABI can change during `0.x` development.
+
+<details>
+<summary>Making a release</summary>
+
+Update `VERSION`, commit the reviewed changes, and run `make test` and
+`make test-iso`. Then tag and push that commit:
+
+```sh
+git tag -a "v$(cat VERSION)" -m "release $(cat VERSION)"
+git push origin HEAD
+git push origin "v$(cat VERSION)"
+```
+
+Release CI checks the tag against `VERSION`, reruns the tests, and publishes
+the kernel ELF, bootable ISO, build metadata and SHA-256 checksums. Keep
+published tags fixed. Bump `VERSION` before starting the next milestone.
+
+`make release` tests and packages a clean, annotated release into `dist/`
+locally. The output directory must be empty.
+
+</details>
+
 ## Screenshots
 
 Memory, processes and uptime:
@@ -74,11 +105,11 @@ Memory, processes and uptime:
 <details>
 <summary>Earlier versions</summary>
 
-### v0.1
+### [v0.1](https://github.com/kkmonlee/kmOS/tree/v0.1)
 
 ![kmOS v0.1 boot screen](media/v0.1-screengrab.png)
 
-### v0.1.1
+### [v0.1.1](https://github.com/kkmonlee/kmOS/tree/v0.1.1)
 
 ![kmOS v0.1.1 boot screen](media/v0.1.1-screengrab.png)
 

@@ -119,6 +119,13 @@ class VM:
 
 
 def boot(args, ram, machine="pc"):
+    version = getattr(args, "version", None)
+    revision = None
+    if not version:
+        metadata = Path(__file__).resolve().parents[1] / "src/kernel/generated/version.json"
+        identity = json.loads(metadata.read_text())
+        version = identity["display_version"]
+        revision = identity["short_revision"]
     with VM(args, f"boot-{machine}-{ram}", ram, machine) as vm:
         vm.wait(lambda text: "[BOOT] Ready" in text and "kmOS:/$ " in text)
         assert "[CPU] Exception frames verified" in vm.text()
@@ -141,8 +148,9 @@ def boot(args, ram, machine="pc"):
         for command in ("fetch", "lsb_release -a"):
             start = len(vm.text())
             info = vm.serial_command(command)[start:]
-            for field in ("kmOS 1.0", "Kernel: monolithic", "Arch: x86 (32-bit)",
-                          "CPU: ", "Memory: ", "Uptime: ", "Paging: on", "Built: "):
+            for field in (f"kmOS {version}", "Kernel: monolithic", "Arch: x86 (32-bit)",
+                          "CPU: ", "Memory: ", "Uptime: ", "Paging: on", "Built: ",
+                          f"Commit: {revision}" if revision else "Commit: "):
                 assert field in info, info
             assert len(re.findall(r"^[ .+#]{32}", info, re.MULTILINE)) == 16, info
             assert all(len(line) < 80 for line in info.splitlines()), info
@@ -503,6 +511,7 @@ def main():
     image.add_argument("--iso", type=Path)
     parser.add_argument("--qemu", default="qemu-system-i386")
     parser.add_argument("--cross", default="i686-elf")
+    parser.add_argument("--version", help="expected version for an externally built image")
     parser.add_argument("--results", type=Path, default=Path("integration_tests/results/paging"))
     args = parser.parse_args()
     if not shutil.which(args.qemu):

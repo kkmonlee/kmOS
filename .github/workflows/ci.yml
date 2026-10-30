@@ -3,6 +3,10 @@ name: kmOS kernel & QEMU integration
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
   push:
     branches: [ master, main, feature/* ]
   pull_request:
@@ -23,6 +27,14 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Validate release tag
+      if: ${{ inputs.release }}
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: python3 scripts/version.py --check-release "$RELEASE_TAG"
       
     - name: Cache cross-compiler toolchain
       uses: actions/cache@v4
@@ -84,6 +96,19 @@ jobs:
 
     - name: Test GRUB ISO boot
       run: make test-iso
+
+    - name: Package release
+      if: ${{ inputs.release }}
+      run: python3 scripts/version.py --package dist
+
+    - name: Upload release files
+      if: ${{ inputs.release }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-files
+        path: dist/
+        if-no-files-found: error
+        retention-days: 7
 
     - name: Upload test logs
       if: always()

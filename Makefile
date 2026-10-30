@@ -5,7 +5,7 @@ KERNEL = src/kernel/kernel.elf
 USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf
 export CROSS
 
-.PHONY: all build run debug test iso test-iso clean check-tools help
+.PHONY: all build run debug test iso test-iso clean check-tools help version check-release release
 
 all: check-tools
 	$(MAKE) -C src/kernel
@@ -14,7 +14,7 @@ all: check-tools
 build: all
 
 check-tools:
-	@for tool in $(CROSS)-g++ $(CROSS)-ld nasm; do \
+	@for tool in $(CROSS)-g++ $(CROSS)-ld nasm python3; do \
 		command -v $$tool >/dev/null || { echo "Missing $$tool. See README.md." >&2; exit 1; }; \
 	done
 
@@ -25,6 +25,7 @@ debug: all
 	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append user -m $(RAM) -display none -serial mon:stdio -no-reboot
 
 test: all
+	python3 integration_tests/version_test.py
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
 	$(CXX) -std=c++17 -fno-builtin -I src/kernel integration_tests/physical_memory_test.cc -o "$$test_dir/memory"; \
 	"$$test_dir/memory"
@@ -35,6 +36,17 @@ iso: all
 
 test-iso: iso
 	python3 integration_tests/boot_test.py --qemu $(QEMU) --iso kmos.iso
+
+version:
+	python3 scripts/version.py
+
+check-release:
+	python3 scripts/version.py --check-release "v$$(cat VERSION)"
+
+release: check-release
+	$(MAKE) test
+	$(MAKE) test-iso
+	python3 scripts/version.py --package dist
 
 clean:
 	$(MAKE) -C src/kernel clean
@@ -47,3 +59,5 @@ help:
 	@echo "make debug     boot in terminal (Ctrl-a x to quit)"
 	@echo "make test      run memory and QEMU tests"
 	@echo "make test-iso  build and boot a GRUB ISO"
+	@echo "make version   show the build version"
+	@echo "make release   test and package an annotated release tag"
