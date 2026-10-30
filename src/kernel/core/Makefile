@@ -3,6 +3,7 @@ CORE_OBJS := \
 	core/elf_loader.o \
 	core/user_boot.o \
 	core/file.o \
+	core/memory_file.o \
 	core/filesystem.o \
 	core/block_device.o \
 	core/ext2.o \

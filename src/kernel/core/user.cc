@@ -49,8 +49,7 @@ u32 User::ioctl(u32 id, u8 *buffer)
 
 u32 User::remove()
 {
-  delete this;
-  return RETURN_OK;
+  return File::remove();
 }
 
 void User::scan() {

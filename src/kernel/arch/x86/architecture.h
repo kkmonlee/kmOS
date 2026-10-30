@@ -42,7 +42,11 @@ public:
   void disable_interrupt();
   void configure_scheduler(u32 pit_frequency_hz);
   InterruptFrame *handle_timer_interrupt(InterruptFrame *frame);
-  InterruptFrame *finish_process(int status);
+  InterruptFrame *finish_process(int status, int signal = 0);
+  InterruptFrame *suspend_process(InterruptFrame *frame);
+  void notify_exit(Process *process);
+  u32 process_count();
+  bool replace_image(process_st *info, process_st *image);
 
   int createProc(process_st *info, const void *file, u32 size, int argc, const char *const *argv);
   void setParam(u32 ret, u32 ret1, u32 ret2, u32 ret3, u32 ret4);

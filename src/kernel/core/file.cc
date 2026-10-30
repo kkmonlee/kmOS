@@ -45,6 +45,8 @@ File::File(const char *n, u8 t)
   checkName();
   master = arch.pcurrent;
   inode = inode_system++;
+  references = 0;
+  removed = false;
   size = 0;
   type = t;
   parent = child = next = prec = link = NULL;
@@ -58,7 +60,7 @@ File::~File()
   while (link_users) link_users->setLink(nullptr);
   detach();
 
-  while (child) delete child;
+  while (child) child->File::remove();
   kfree(name);
 }
 
@@ -102,6 +104,7 @@ u32 File::addChild(File *n)
   if (n->parent == this) return RETURN_OK;
 
   n->detach();
+  n->removed = false;
   n->setParent(this);
   n->setPrec(NULL);
   n->setNext(child);
@@ -201,8 +204,24 @@ u32 File::write(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED
 u32 File::ioctl(u32 /*id*/, u8 * /*buffer*/) { return NOT_DEFINED; }
 u32 File::remove()
 {
-  delete this;
-  return NOT_DEFINED;
+  u32 flags = irq_save();
+  detach();
+  removed = true;
+  if (!references) delete this;
+  irq_restore(flags);
+  return RETURN_OK;
+}
+
+void File::retain() {
+  u32 flags = irq_save();
+  ++references;
+  irq_restore(flags);
+}
+
+void File::release() {
+  u32 flags = irq_save();
+  if (references && !--references && removed) delete this;
+  irq_restore(flags);
 }
 
 /**

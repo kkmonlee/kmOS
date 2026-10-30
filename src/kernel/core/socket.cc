@@ -38,8 +38,7 @@ u32 Socket::ioctl(u32 id, u8 *buffer)
 
 u32 Socket::remove()
 {
-  delete this;
-  return RETURN_OK;
+  return File::remove();
 }
 
 void Socket::scan() {

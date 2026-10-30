@@ -41,8 +41,7 @@ u32 ModLink::ioctl(u32 id, u8 *buffer)
 
 u32 ModLink::remove()
 {
-  delete this;
-  return RETURN_OK;
+  return File::remove();
 }
 
 void ModLink::scan()

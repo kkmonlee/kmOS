@@ -67,9 +67,11 @@ u32 Variable::read(u32 pos, u8 *buffer, u32 size)
     return NOT_DEFINED;
   }
 
-  size_t read_size = strnlen(value_, size);
-  strncpy((char *)buffer, value_, read_size);
-  return read_size;
+  u32 length = strlen(value_);
+  if (pos >= length) return 0;
+  if (size > length - pos) size = length - pos;
+  memcpy(buffer, value_ + pos, size);
+  return size;
 }
 
 u32 Variable::write(u32 pos, u8 *buffer, u32 size)
@@ -131,8 +133,7 @@ u32 Variable::ioctl(u32 id, u8 *buffer)
 
 u32 Variable::remove()
 {
-  delete this;
-  return RETURN_OK;
+  return File::remove();
 }
 
 void Variable::scan()

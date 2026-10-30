@@ -27,6 +27,8 @@ public:
   virtual u32 ioctl(u32 id, u8 *buffer);
   virtual u32 remove();
   virtual void scan();
+  void retain();
+  void release();
 
   void checkName();
 
@@ -65,6 +67,8 @@ protected:
   u32 size;
   u8 type;
   u32 inode;
+  u32 references;
+  bool removed;
   File *dev;
   File *link;
   File *link_users;

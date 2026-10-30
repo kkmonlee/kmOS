@@ -11,10 +11,10 @@ _start:
     cmp dword [esp], 1
     jne failed
     mov eax, [esp + 4]
-    cmp dword [eax], 'init'
-    jne failed
-    cmp byte [eax + 4], 0
-    jne failed
+    test eax, eax
+    jz failed
+    cmp byte [eax], 0
+    je failed
     cmp dword [esp + 8], 0
     jne failed
     cmp dword [esp + 12], 0

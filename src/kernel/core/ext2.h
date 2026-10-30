@@ -125,6 +125,8 @@ private:
 class Ext2RegularFile : public Ext2Node {
 public:
     Ext2RegularFile(const char* name, Ext2Mount* mount, u32 inode, u32 size);
+    u32 open(u32 flags) override { return flags ? (u32)-30 : 0; }
+    u32 close() override { return 0; }
     virtual u32 read(u32 pos, u8* buffer, u32 size) override;
 };
 

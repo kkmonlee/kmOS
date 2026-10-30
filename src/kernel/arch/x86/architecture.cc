@@ -379,43 +379,44 @@ struct page_directory *Architecture::get_current_page_directory()
 
 void Architecture::destroy_all_zombie()
 {
-    u32 interrupt_flags = irq_save();
-
-    if (plist == nullptr)
-    {
-        irq_restore(interrupt_flags);
-        return;
-    }
-
-    Process *cursor = plist;
-    Process *pending_cleanup = nullptr;
-
-    do
-    {
-        Process *next = cursor->getPNext();
-        if (cursor != idle_process && cursor != pcurrent && cursor->getState() == ZOMBIE)
-        {
-            remove_process(cursor);
-            cursor->setPNext(pending_cleanup);
-            pending_cleanup = cursor;
-
-            if (plist == nullptr)
-            {
+    u32 flags = irq_save();
+    for (;;) {
+        Process *victim = nullptr;
+        Process *cursor = plist;
+        if (cursor) do {
+            if (cursor != pcurrent && cursor != idle_process && cursor->state == ZOMBIE && cursor->collected) {
+                victim = cursor;
                 break;
             }
-        }
-
-        cursor = next;
-    } while (cursor != nullptr && cursor != plist);
-
-    irq_restore(interrupt_flags);
-
-    while (pending_cleanup != nullptr)
-    {
-        Process *victim = pending_cleanup;
-        pending_cleanup = pending_cleanup->getPNext();
-        victim->setPNext(nullptr);
+            cursor = cursor->pnext;
+        } while (cursor && cursor != plist);
+        if (!victim) break;
+        remove_process(victim);
         delete victim;
+    }
+    irq_restore(flags);
+}
+
+u32 Architecture::process_count() {
+    u32 count = 0;
+    Process *cursor = plist;
+    if (cursor) do { ++count; cursor = cursor->pnext; } while (cursor && cursor != plist);
+    return count;
+}
+
+void Architecture::notify_exit(Process *process) {
+    Process *cursor = plist;
+    if (cursor) do {
+        if (cursor->pparent == process) {
+            cursor->pparent = plist;
+            cursor->collected = true;
+        }
+        cursor = cursor->pnext;
+    } while (cursor && cursor != plist);
+    Process *parent = process->pparent;
+    if (parent) {
+        parent->sendSignal(SIGCHLD);
+        parent->completeWait(process);
     }
 }
 
@@ -491,6 +492,7 @@ InterruptFrame *Architecture::load_process_context(Process *proc)
 InterruptFrame *Architecture::handle_timer_interrupt(InterruptFrame *frame)
 {
     total_ticks++;
+    destroy_all_zombie();
 
     if (!scheduler_ready || pcurrent == nullptr)
     {
@@ -527,12 +529,44 @@ InterruptFrame *Architecture::handle_timer_interrupt(InterruptFrame *frame)
     return load_process_context(pcurrent);
 }
 
-InterruptFrame *Architecture::finish_process(int status) {
-    pcurrent->exit(status);
+InterruptFrame *Architecture::finish_process(int status, int signal) {
+    pcurrent->exit(status, signal);
     Process *next = pcurrent->schedule();
     pcurrent = next;
     ticks_since_switch = 0;
     return load_process_context(next);
+}
+
+InterruptFrame *Architecture::suspend_process(InterruptFrame *frame) {
+    save_process_context(pcurrent, frame);
+    pcurrent = pcurrent->schedule();
+    ticks_since_switch = 0;
+    return load_process_context(pcurrent);
+}
+
+bool Architecture::replace_image(process_st *info, process_st *image) {
+    if (!info || !image || !image->pd || !info->syscall_frame) return false;
+    page_directory *old = info->pd;
+    info->pd = image->pd;
+    info->b_exec = image->b_exec;
+    info->e_exec = image->e_exec;
+    info->b_bss = image->b_bss;
+    info->e_bss = image->e_bss;
+    info->b_heap = image->b_heap;
+    info->e_heap = image->e_heap;
+    memset(&info->regs, 0, sizeof(info->regs));
+    info->regs.eip = image->regs.eip;
+    info->regs.esp = image->regs.esp;
+    info->regs.cs = 0x23;
+    info->regs.ss = info->regs.ds = info->regs.es = info->regs.fs = info->regs.gs = 0x2b;
+    info->regs.eflags = 0x202;
+    info->regs.cr3 = info->pd->physical_address;
+    info->interrupt_stack = info->syscall_frame;
+    info->signal = 0;
+    memset(info->sigfn, 0, sizeof(info->sigfn));
+    load_process_context(pcurrent);
+    vmm.destroy_page_directory(old);
+    return true;
 }
 
 int Architecture::fork(process_st *info, process_st *father) {

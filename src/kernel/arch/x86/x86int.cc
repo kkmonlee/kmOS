@@ -36,7 +36,7 @@ extern "C" InterruptFrame *exception_handler(regs_t *frame) {
         serial::write(" address=");
         serial::hex(address);
         serial::write("\n");
-        return arch.finish_process(128 + frame->which_int);
+        return arch.finish_process(128 + frame->which_int, frame->which_int);
     }
     serial::write("[PANIC] exception=");
     serial::hex(frame->which_int);

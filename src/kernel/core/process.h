@@ -14,11 +14,13 @@
 #define SLEEPING 2
 #define READY 4
 
-struct openfile
+struct openfile : public File
 {
+  openfile(File *file, u32 flags);
+  ~openfile();
   u32 mode;
   u32 ptr;
-  File *fp;
+  u32 users;
 };
 
 class Process : public File
@@ -39,19 +41,25 @@ public:
 
   u32 create(const void *file, u32 size, int argc, const char *const *argv);
   void sendSignal(int sig);
-  u32 wait();
+  int wait(int child, u32 status, u32 options);
+  bool completeWait(Process *child);
+  bool waitingFor(Process *child);
   u32 addFile(File *fp, u32 m);
   File *getFile(u32 fd);
-  void deleteFile(u32 fd);
+  int deleteFile(u32 fd);
+  int duplicateFile(u32 from, u32 to);
+  bool setupConsole();
+  void closeFiles(bool exec = false);
   openfile *getFileInfo(u32 fd);
 
-  void exit(int status = 0);
+  void exit(int status = 0, int signal = 0);
   int getExitStatus();
+  u32 getWaitStatus();
   int fork();
+  int exec(const char *path, int argc, const char *const *argv, int envc, const char *const *envp);
 
   void setState(u8 st);
   u8 getState();
-  void setFile(u32 fd, File *fp, u32 ptr, u32 mode);
   void setPid(u32 pid);
   u32 getPid();
 
@@ -76,9 +84,15 @@ protected:
   u32 pid;
   u8 state;
   int exit_status;
+  int exit_signal;
+  int wait_child;
+  u32 wait_status;
+  bool waiting;
+  bool collected;
   Process *pparent;
   Process *pnext;
-  openfile openfp[CONFIG_MAX_FILE];
+  openfile *openfp[CONFIG_MAX_FILE];
+  bool close_on_exec[CONFIG_MAX_FILE];
   proc_info ppinfo;
   process_st info;
   File *cdir;

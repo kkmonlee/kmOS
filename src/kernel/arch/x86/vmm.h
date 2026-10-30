@@ -72,6 +72,10 @@ public:
     void unmap_page(struct page_directory *pd, u32 virtual_addr);
     u32 get_physical_addr(struct page_directory *pd, u32 virtual_addr);
     bool user_range(struct page_directory *pd, u32 address, u32 size, bool writable = false);
+    bool prepare_user_write(struct page_directory *pd, u32 address, u32 size);
+    bool copy_from_user(struct page_directory *pd, void *buffer, u32 address, u32 size);
+    bool copy_to_user(struct page_directory *pd, u32 address, const void *buffer, u32 size);
+    int user_string(struct page_directory *pd, u32 address, char *buffer, u32 capacity);
     int handle_page_fault(u32 fault_addr, u32 error_code);
     void switch_page_directory(struct page_directory *pd);
     u32 alloc_frame();

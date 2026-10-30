@@ -124,7 +124,8 @@ def boot(args, ram, machine="pc"):
         assert "[CPU] Exception frames verified" in vm.text()
         assert "[VMM] Page tables verified" in vm.text()
         if args.iso:
-            assert "Hello from ring 3" in vm.text() and "[USER] Reaped init" in vm.text(), vm.text()
+            assert all(value in vm.text() for value in ("Starting userland", "Hello from ring 3",
+                                                      "kmOS userland", "[USER] Reaped init")), vm.text()
         registers = vm.monitor("info registers")
         cr0 = int(re.search(r"CR0=([0-9a-fA-F]+)", registers)[1], 16)
         assert cr0 & 0x80010000 == 0x80010000, registers
@@ -233,6 +234,54 @@ def cow(args, ram):
     print(f"PASS COW ownership, isolation, rollback and cleanup: {ram} MB", flush=True)
 
 
+def process_files(args, ram):
+    with VM(args, f"process-files-{ram}", ram, append="test=process") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[PROC] descriptor references, close, removal and cwd verified" in text, text
+        assert "[PANIC]" not in text and "Invalid magic" not in text, text
+    print(f"PASS descriptor ownership, close, removal and cwd: {ram} MB", flush=True)
+
+
+def build_process_tests(args, temp):
+    repo = Path(__file__).resolve().parents[1]
+    for source, name in (("process_test.c", "init"), ("exec_test.c", "exec-target")):
+        obj = temp / (name + ".o")
+        subprocess.run([args.cross + "-gcc", "-std=c11", "-m32", "-O2", "-g", "-Wall", "-Wextra",
+                        "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie", "-fno-stack-protector",
+                        "-I", str(repo / "src/userland"), "-c", str(repo / "integration_tests" / source),
+                        "-o", str(obj)], check=True)
+        subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
+                        str(repo / "src/userland/linker.ld"), "-o", str(temp / (name + ".elf")),
+                        str(repo / "src/userland/start.o"), str(obj)], check=True)
+    return ",".join(str(path) for path in (temp / "init.elf", temp / "exec-target.elf",
+                                          repo / "src/userland/hello.elf"))
+
+
+def processes(args, module, ram, machine="pc"):
+    with VM(args, f"processes-{machine}-{ram}", ram, machine, append="user", module=module) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text, timeout=30)
+        assert "process lifecycle verified" in text and "[USER] Exit status=00000000" in text, text
+        assert "[USER] Reaped init" in text and "Frame leak" not in text, text
+        assert "[PANIC]" not in text and "Invalid magic" not in text and "Invalid block" not in text, text
+        assert "\nsurvived\n" in vm.serial_command("echo survived"), vm.text()
+        text = vm.serial_command("ps")
+        assert "init" not in text.split("ps\n")[-1] and "exec-target" not in text.split("ps\n")[-1], text
+    print(f"PASS fork, exec, wait, descriptors, COW, faults, limits and orphans: {machine}, {ram} MB", flush=True)
+
+
+def userland(args, ram=64):
+    directory = Path(__file__).resolve().parents[1] / "src/userland"
+    module = ",".join(str(directory / (name + ".elf")) for name in ("init", "hello", "cat"))
+    with VM(args, f"userland-{ram}", ram, append="user", module=module) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text)
+        for expected in ("Starting userland", "Hello from ring 3", "kmOS userland",
+                         "[USER] Exit status=00000000", "[USER] Reaped init"):
+            assert expected in text, text
+        assert "[PANIC]" not in text and "Frame leak" not in text, text
+    print(f"PASS user init, hello and cat: {ram} MB", flush=True)
+
+
 def elf(args, ram):
     with VM(args, f"elf-{ram}", ram, append="test=elf") as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
@@ -279,7 +328,7 @@ def user_failures(args, temp):
             int 0x80
             cmp eax, -38
             jne failed
-            mov eax, 2
+            mov eax, 14
             int 0x80
             cmp eax, -38
             jne failed
@@ -470,7 +519,14 @@ def main():
         filesystem(args, ram)
         cow(args, ram)
         elf(args, ram)
+        process_files(args, ram)
         user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", ram=ram)
+    with tempfile.TemporaryDirectory(prefix="kmos-process-") as temp:
+        module = build_process_tests(args, Path(temp))
+        for ram in (16, 32, 64, 128, 512, 1536):
+            processes(args, module, ram)
+        processes(args, module, 64, "q35")
+    userland(args)
     boot(args, 64, "q35")
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")
     with tempfile.TemporaryDirectory(prefix="kmos-user-") as temp:

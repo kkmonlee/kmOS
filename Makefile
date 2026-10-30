@@ -2,7 +2,7 @@ CROSS ?= i686-elf
 QEMU ?= qemu-system-i386
 RAM ?= 64M
 KERNEL = src/kernel/kernel.elf
-USER_PROGRAM = src/userland/hello.elf
+USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf
 export CROSS
 
 .PHONY: all build run debug test iso test-iso clean check-tools help

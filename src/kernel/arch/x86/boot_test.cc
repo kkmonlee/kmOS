@@ -8,6 +8,7 @@ bool verify_heap();
 bool verify_filesystem();
 bool verify_cow();
 bool verify_elf();
+bool verify_process_files();
 
 static void finish(bool passed) {
     serial::write(passed ? "[TEST] passed\n" : "[TEST] failed\n");
@@ -19,6 +20,7 @@ void run_filesystem_test(const multiboot_info *boot) {
     if (!(boot->flags & 4) || !boot->cmdline || boot->cmdline > USER_OFFSET - 4096) return;
     if (boot_has_argument((const char *)boot->cmdline, "test=filesystem"))
         finish(verify_filesystem());
+    if (boot_has_argument((const char *)boot->cmdline, "test=process")) finish(verify_process_files());
 }
 
 static u32 module_hash(const multiboot_info *boot) {

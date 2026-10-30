@@ -20,4 +20,6 @@ extern "C" {
     void *kmalloc_scoped(u32 size);
 }
 
+inline void *operator new(__SIZE_TYPE__, void *memory) noexcept { return memory; }
+
 #endif

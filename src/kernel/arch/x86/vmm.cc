@@ -294,6 +294,60 @@ bool VMM::user_range(page_directory *pd, u32 address, u32 size, bool writable) {
     }
 }
 
+bool VMM::prepare_user_write(page_directory *pd, u32 address, u32 size) {
+    if (!user_range(pd, address, size)) return false;
+    if (!size) return true;
+    u32 last = (address + size - 1) & ~(PAGESIZE - 1);
+    for (u32 page = address & ~(PAGESIZE - 1);; page += PAGESIZE) {
+        page_table_entry &entry = pd->page_tables[VADDR_PD_OFFSET(page)][VADDR_PT_OFFSET(page)];
+        if (!pd->tables[VADDR_PD_OFFSET(page)].writable || (!entry.writable && !entry.cow)) return false;
+        if (page == last) break;
+    }
+    for (u32 page = address & ~(PAGESIZE - 1);; page += PAGESIZE) {
+        page_table_entry &entry = pd->page_tables[VADDR_PD_OFFSET(page)][VADDR_PT_OFFSET(page)];
+        if (!entry.writable && cow_manager.handle_cow_fault(pd, page, 3)) return false;
+        if (page == last) return true;
+    }
+}
+
+bool VMM::copy_from_user(page_directory *pd, void *buffer, u32 address, u32 size) {
+    if (!user_range(pd, address, size)) return false;
+    u8 *bytes = (u8 *)buffer;
+    while (size) {
+        u32 chunk = PAGESIZE - (address & (PAGESIZE - 1));
+        if (chunk > size) chunk = size;
+        const u8 *source = (const u8 *)get_physical_addr(pd, address);
+        for (u32 i = 0; i < chunk; ++i) bytes[i] = source[i];
+        bytes += chunk;
+        address += chunk;
+        size -= chunk;
+    }
+    return true;
+}
+
+bool VMM::copy_to_user(page_directory *pd, u32 address, const void *buffer, u32 size) {
+    if (!prepare_user_write(pd, address, size)) return false;
+    const u8 *bytes = (const u8 *)buffer;
+    while (size) {
+        u32 chunk = PAGESIZE - (address & (PAGESIZE - 1));
+        if (chunk > size) chunk = size;
+        u8 *target = (u8 *)get_physical_addr(pd, address);
+        for (u32 i = 0; i < chunk; ++i) target[i] = bytes[i];
+        bytes += chunk;
+        address += chunk;
+        size -= chunk;
+    }
+    return true;
+}
+
+int VMM::user_string(page_directory *pd, u32 address, char *buffer, u32 capacity) {
+    for (u32 i = 0; i < capacity; ++i) {
+        if (address + i < address || !copy_from_user(pd, buffer + i, address + i, 1)) return -14;
+        if (!buffer[i]) return 0;
+    }
+    return -36;
+}
+
 int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
     if (!current_directory || (error_code & 8)) return -1;
     u32 page_addr = fault_addr & ~0xFFF;

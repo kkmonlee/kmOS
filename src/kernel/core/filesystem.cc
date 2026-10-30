@@ -2,6 +2,7 @@
 #include <filesystem.h>
 #include <filesystem_driver.h>
 #include <core/block_device.h>
+#include <memory_file.h>
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
@@ -30,6 +31,7 @@ void Filesystem::init()
   root = new File("/", TYPE_DIRECTORY);
 
   dev = root->createChild("dev", TYPE_DIRECTORY);
+  if (this == &fsm) init_console();
   root->createChild("proc", TYPE_DIRECTORY);
   root->createChild("mnt", TYPE_DIRECTORY);
   File *sysd = root->createChild("sys", TYPE_DIRECTORY);

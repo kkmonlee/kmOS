@@ -1,344 +1,134 @@
 #include <os.h>
 #include <process.h>
-#include <arch/x86/architecture.h>
+#include <architecture.h>
 #include <filesystem.h>
-#include <elf_loader.h>
 
-extern "C" {
-    char *strncpy(char *destString, const char *sourceString, int maxLength);
-    void *memcpy(void *dest, const void *src, int n);
+static bool bad_pointer(bool valid) {
+  if (valid) return false;
+  arch.pcurrent->exit(142, 14);
+  return true;
 }
 
-extern Filesystem fsm;
-
-/*
- *	u32 open(char* name,u32 flag);
- */
-void call_open()
-{
-  char *name = (char *)arch.getArg(0);
-  u32 flag = arch.getArg(1);
-
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)-1);
+void call_open() {
+  char path[Filesystem::kMaxPathLength];
+  Process *process = arch.pcurrent;
+  int result = vmm.user_string(process->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
+  if (bad_pointer(result != -14)) return;
+  if (result) { arch.setRet(result); return; }
+  File *file = fsm.path(path);
+  if (!file) { arch.setRet((u32)-2); return; }
+  if (file->getType() != TYPE_FILE && file->getType() != TYPE_DEVICE) {
+    arch.setRet((u32)-21);
     return;
   }
-
-  File *fp = fsm.path(name);
-  if (!fp)
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-  fp->open(flag);
-  u32 fd = p->addFile(fp, flag);
-
-  arch.setRet(fd);
+  arch.setRet(process->addFile(file, arch.getArg(1)));
 }
 
-/*
- *	void close(u32 fd);
- */
-void call_close()
-{
-  u32 fd = arch.getArg(0);
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)-1);
+void call_close() { arch.setRet(arch.pcurrent->deleteFile(arch.getArg(0))); }
+
+void call_read() {
+  Process *process = arch.pcurrent;
+  u32 fd = arch.getArg(0), address = arch.getArg(1), size = arch.getArg(2);
+  File *file = process->getFile(fd);
+  openfile *description = process->getFileInfo(fd);
+  if (!file || description->mode == 1) { arch.setRet((u32)-9); return; }
+  if (!size) { arch.setRet(0); return; }
+  if (bad_pointer(vmm.prepare_user_write(process->getPInfo()->pd, address, size))) return;
+  u8 buffer[PAGESIZE];
+  u32 count = size > sizeof(buffer) ? sizeof(buffer) : size;
+  if (file->getType() != TYPE_DEVICE && count > 0xffffffffU - description->ptr) {
+    arch.setRet((u32)-75);
     return;
   }
-
-  File *fp = p->getFile(fd);
-  if (fp == NULL)
-  {
-    return;
+  int result = file->read(description->ptr, buffer, count);
+  if (result > (int)count) result = -5;
+  if (result > 0) {
+    if (bad_pointer(vmm.copy_to_user(process->getPInfo()->pd, address, buffer, result))) return;
+    if (file->getType() != TYPE_DEVICE) description->ptr += result;
   }
-
-  fp->close();
-  p->deleteFile(fd);
+  arch.setRet(result);
 }
 
-/*
- *	u32 read(u32 fd,char* buf,u32 size);
- */
-void call_read()
-{
-  u32 fd = arch.getArg(0);
-  u8 *buf = (u8 *)arch.getArg(1);
-  u32 size = arch.getArg(2);
-
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)-1);
+void call_write() {
+  Process *process = arch.pcurrent;
+  u32 fd = arch.getArg(0), address = arch.getArg(1), size = arch.getArg(2);
+  File *file = process->getFile(fd);
+  openfile *description = process->getFileInfo(fd);
+  if (!file || description->mode == 0) { arch.setRet((u32)-9); return; }
+  if (!size) { arch.setRet(0); return; }
+  page_directory *pd = process->getPInfo()->pd;
+  if (bad_pointer(vmm.user_range(pd, address, size))) return;
+  u8 buffer[PAGESIZE];
+  u32 count = size > sizeof(buffer) ? sizeof(buffer) : size;
+  if (bad_pointer(vmm.copy_from_user(pd, buffer, address, count))) return;
+  if (file->getType() != TYPE_DEVICE && count > 0xffffffffU - description->ptr) {
+    arch.setRet((u32)-75);
     return;
   }
-
-  File *fp = p->getFile(fd);
-  if (fp == NULL)
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-  openfile *info = p->getFileInfo(fd);
-  u32 ret = fp->read(info->ptr, buf, size);
-  info->ptr = info->ptr + ret;
-  arch.setRet(ret);
+  int result = file->write(description->ptr, buffer, count);
+  if (result > (int)count) result = -5;
+  if (result > 0 && file->getType() != TYPE_DEVICE) description->ptr += result;
+  arch.setRet(result);
 }
 
-/*
- *	u32 write(u32 fd,char* buf,u32 size);
- */
-void call_write()
-{
-  u32 fd = arch.getArg(0);
-  u8 *buf = (u8 *)arch.getArg(1);
-  u32 size = arch.getArg(2);
-
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-
-  if (fd != 1 && fd != 2) {
-    arch.setRet((u32)-9);
-    return;
-  }
-  if (!size) {
-    arch.setRet(0);
-    return;
-  }
-  if (!vmm.user_range(p->getPInfo()->pd, (u32)buf, size)) {
-    p->exit(142);
-    return;
-  }
-  u32 count = size > 4096 ? 4096 : size;
-  for (u32 i = 0; i < count; ++i) io.putc(buf[i]);
-  arch.setRet(count);
+void call_exit() { arch.pcurrent->exit(arch.getArg(0)); }
+void call_fork() { arch.setRet(arch.pcurrent->fork()); }
+void call_dup2() { arch.setRet(arch.pcurrent->duplicateFile(arch.getArg(0), arch.getArg(1))); }
+void call_wait() { arch.setRet(arch.pcurrent->wait((int)arch.getArg(0), arch.getArg(1), arch.getArg(2))); }
+void call_getpid() { arch.setRet(arch.pcurrent->getPid()); }
+void call_getppid() {
+  Process *parent = arch.pcurrent->getPParent();
+  arch.setRet(parent ? parent->getPid() : 0);
 }
 
-/*
- *	u32 ioctl(u32 fd,u32 pos,char* buf);
- */
-void call_ioctl()
-{
-  u32 fd = arch.getArg(0);
-  u8 *buf = (u8 *)arch.getArg(2);
-  u32 pos = arch.getArg(1);
-
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-
-  File *fp = p->getFile(fd);
-  if (fp == NULL)
-  {
-    arch.setRet(-1);
-    return;
-  }
-
-  u32 ret = fp->ioctl(pos, buf);
-  arch.setRet(ret);
+void call_chdir() {
+  char path[Filesystem::kMaxPathLength];
+  Process *process = arch.pcurrent;
+  int result = vmm.user_string(process->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
+  if (bad_pointer(result != -14)) return;
+  if (result) { arch.setRet(result); return; }
+  File *file = fsm.path(path);
+  arch.setRet(!file ? (u32)-2 : (process->setCurrentDir(file) ? 0 : (u32)-20));
 }
 
-/*
- *	char* sbrk(int size);
- */
-void call_sbrk()
-{
-  int size;
-  size = arch.getArg(0);
-  char *ret;
-  Process *p = arch.pcurrent;
-  process_st *current = p->getPInfo();
-  ret = current->e_heap;
-
-  current->e_heap += size;
-
-  arch.setRet((u32)ret);
-  return;
-}
-
-/*
- *	void exit(int code);
- */
-void call_exit()
-{
-  int code;
-  code = arch.getArg(0);
-
-  Process *p = arch.pcurrent;
-  p->exit(code);
-  return;
-}
-
-/*
- *	int execv(const char* filename, char* const argv[], char* const envp[] );
- */
-void call_execv()
-{
-  char *filename, **argv, **envp;
-  filename = (char *)arch.getArg(0);
-  argv = (char **)arch.getArg(1);
-  envp = (char **)arch.getArg(2);
-  int argc;
-  char **ap;
-
-  ap = argv;
-  argc = 0;
-  while (*ap++)
-    argc++;
-
-  int ret = execv(filename, argc, argv);
-  arch.setRet((u32)ret);
-  return;
-}
-
-/*
- *	int symlink(const char* oldpath, const char* newpath);
- */
-void call_symlink()
-{
-  char *oldpath, *path;
-  oldpath = (char *)arch.getArg(0);
-  path = (char *)arch.getArg(1);
-
-  int ret = fsm.link(oldpath, path);
-  arch.setRet((u32)ret);
-  return;
-}
-
-struct dirent
-{
-  u64 d_ino;
-  char d_name[256];
+struct ExecArguments {
+  char path[Filesystem::kMaxPathLength];
+  char strings[PAGESIZE];
+  const char *argv[33];
+  const char *envp[33];
+  int argc, envc;
+  u32 used;
 };
 
-/*
- *	int getdents(int fd,dirrent* entry,int size);
- */
-void call_getdents()
-{
-  dirent nentry;
-  u32 fd = arch.getArg(0);
-  dirent *entry = (dirent *)arch.getArg(1);
-  int size = arch.getArg(2);
-
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)0);
-    return;
+static int copy_vector(u32 address, const char **values, int &count, ExecArguments *args) {
+  count = 0;
+  if (!address) return 0;
+  page_directory *pd = arch.pcurrent->getPInfo()->pd;
+  for (u32 i = 0; i <= 32; ++i) {
+    u32 pointer;
+    if (address + i * 4 < address || !vmm.copy_from_user(pd, &pointer, address + i * 4, 4)) return -14;
+    if (!pointer) return 0;
+    if (i == 32 || args->used == sizeof(args->strings)) return -7;
+    u32 capacity = sizeof(args->strings) - args->used;
+    if (capacity > 256) capacity = 256;
+    char *string = args->strings + args->used;
+    int result = vmm.user_string(pd, pointer, string, capacity);
+    if (result) return result == -14 ? -14 : -7;
+    values[count++] = string;
+    do { ++args->used; } while (*string++);
   }
-
-  File *fp = p->getFile(fd);
-  if (fp == NULL)
-  {
-    arch.setRet(0);
-    return;
-  }
-  openfile *info = p->getFileInfo(fd);
-  int i = 0;
-  File *child = fp->getChild();
-  while (child != NULL)
-  {
-    if (i == (info->ptr))
-    {
-      nentry.d_ino = child->getInode();
-      strncpy(nentry.d_name, child->getName(), 256);
-      memcpy((char *)entry, (char *)&nentry, size);
-      info->ptr++;
-      arch.setRet(1);
-      return;
-    }
-    i++;
-    child = child->getNext();
-  }
-  arch.setRet((u32)0);
-  return;
+  return -7;
 }
 
-void call_wait()
-{
-  u32 *status = (u32 *)arch.getArg(1);
-  *status = 0;
-  Process *p = arch.pcurrent;
-  u32 ret = p->wait();
-}
-
-void call_dup2()
-{
-  u32 oldfd = arch.getArg(0);
-  u32 newfd = arch.getArg(1);
-  u32 ret = newfd;
-  Process *p = arch.pcurrent;
-  p->setFile((u32)newfd, p->getFile(oldfd), 0, 0);
-  arch.setRet((u32)ret);
-}
-
-/*
- *	int fork();
- */
-void call_fork()
-{
-  Process *p = arch.pcurrent;
-  int ret = p->fork();
-  arch.setRet((u32)ret);
-}
-
-/*
- *	int chdir(char* n);
- */
-void call_chdir()
-{
-  char *n;
-  n = (char *)arch.getArg(0);
-
-  Process *p = arch.pcurrent;
-  File *f = fsm.path(n);
-  if (!p || !f || !p->setCurrentDir(f))
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-
-  arch.setRet((u32)1);
-  return;
-}
-
-/*
- *	void * mmap (void *addr,size_t len,int prot,int flags,int fd,off_t offset)
- */
-void call_mmap()
-{
-  u32 fd = arch.getArg(3);
-  u32 size = arch.getArg(0);
-  u32 prot = 0;
-  u32 flags = 0;
-  u32 offset = 0;
-
-  Process *p = arch.pcurrent;
-  if (p == NULL)
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-
-  File *fp = p->getFile(fd);
-  if (fp == NULL)
-  {
-    arch.setRet((u32)-1);
-    return;
-  }
-  openfile *info = p->getFileInfo(fd);
-  u32 ret = fp->mmap(size, flags, offset, prot);
-  arch.setRet(ret);
+void call_execv() {
+  ExecArguments *args = (ExecArguments *)kmalloc(sizeof(ExecArguments));
+  if (!args) { arch.setRet((u32)-12); return; }
+  args->used = 0;
+  int result = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), args->path, sizeof(args->path));
+  if (!result) result = copy_vector(arch.getArg(1), args->argv, args->argc, args);
+  if (!result) result = copy_vector(arch.getArg(2), args->envp, args->envc, args);
+  if (!result) result = arch.pcurrent->exec(args->path, args->argc, args->argv, args->envc, args->envp);
+  kfree(args);
+  if (bad_pointer(result != -14)) return;
+  if (result) arch.setRet(result);
 }
