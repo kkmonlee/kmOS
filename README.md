@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/kmos.png" width="520" alt="kmOS: a UNIX-like monolithic operating system">
+  <img src="media/kmos.png" width="600" alt="kmOS: a UNIX-like monolithic operating system">
 </p>
 
 <p align="center">
@@ -7,62 +7,83 @@
   <a href="https://github.com/kkmonlee/kmOS/actions/workflows/nightly.yml"><img src="https://github.com/kkmonlee/kmOS/actions/workflows/nightly.yml/badge.svg" alt="Nightly validation"></a>
 </p>
 
-My x86 kernel in C++. Mostly working on memory management.
+kmOS is a UNIX-like operating system for 32-bit x86, written in C++ and assembly.
+It's a personal project built around a monolithic kernel, with most of the work
+focused on memory management and processes.
 
-Boots through Multiboot/GRUB with VGA and serial consoles.
+<p align="center">
+  <img src="media/fetch.png" width="720" alt="kmOS running in QEMU">
+</p>
 
-## Running it
+## Build and run
 
-Needs i686-elf GCC/binutils, NASM, QEMU, make and Python 3.
+You'll need an `i686-elf` GCC/binutils toolchain, NASM, QEMU, make and Python 3.
 
-```
-make
+```sh
 make run
-make debug     # terminal, Ctrl-a x to quit
-make test
-make test-iso  # needs GRUB + xorriso, or Docker/OrbStack
 ```
 
-No disk image or root access needed. `RAM=128M make run` to change RAM.
-Run `fetch` or `lsb_release -a` in the shell for system info.
+This builds the kernel and user programs, then boots QEMU with 64 MB of RAM.
+User `init` runs `hello` and `cat`, waits for them to finish, and exits to the
+kernel shell. No disk image or root access is needed.
 
-Paging is on. Only the first 1 GB of RAM is managed for now.
-The shell runs in kernel space. Userland and filesystems still need work.
+| Command | What it does |
+| --- | --- |
+| `make` | Build the kernel and user programs |
+| `make run RAM=128M` | Boot with 128 MB of RAM |
+| `make debug` | Boot in the terminal; press Ctrl-a, then x to quit |
+| `make test` | Run memory and QEMU integration tests |
+| `make iso` | Build a bootable GRUB ISO |
+| `make test-iso` | Build and test the GRUB ISO |
 
-`make run` and the GRUB ISO load `init`, `hello` and `cat` as boot modules
-under `/bin`. User `init` forks, execs the other programs, waits for them,
-and exits before the kernel shell starts. `cat` reads `/etc/motd`.
-The loader accepts static i386 ELF executables with separate loadable pages.
-Syscalls use `int 0x80`: EAX selects the call, EBX/ECX/EDX carry arguments,
-and EAX holds the result or a negative error. Available calls are `exit` (1),
-`fork` (2), `read` (3), `write` (4), `open` (5), `close` (6), `waitpid` (7),
-`execve` (11), `chdir` (12), `getpid` (20), `dup2` (63) and `getppid` (64).
-`waitpid` accepts a child PID or -1, with optional `WNOHANG` (1).
-Normal exit status uses the high byte; a fault vector uses the low bits.
-Open supports access modes 0, 1 and 2, plus `O_CLOEXEC` (0x80000).
-Console input returns -11 when no data is ready. Boot modules are read-only.
-Invalid pointers and user faults terminate the process. Storage writes,
-process groups, pipes and signal handlers still need work.
+ISO builds need GRUB and xorriso, or a running Docker/OrbStack installation.
+
+In the shell, try `help`, `ls`, `cat /etc/motd`, `mem`, `ps` or `uptime`.
+`fetch` and `lsb_release -a` show system information.
+
+## What works
+
+| Area | Current support |
+| --- | --- |
+| Boot | Multiboot/GRUB, VGA and serial consoles |
+| Memory | Paging, physical frame tracking, heap allocators and copy-on-write |
+| Processes | Ring-3 ELF programs, timer scheduling, `fork`, `execve` and `waitpid` |
+| Files | Paths, working directories, shared descriptors, `dup2` and close-on-exec |
+| Userland | `init`, `hello` and `cat`, loaded from boot modules under `/bin` |
+| Input | Keyboard and serial input |
+
+User programs have separate address spaces and guarded stacks. Invalid pointers
+and user faults terminate the process. The supported syscall wrappers are in
+[src/userland/user.h](src/userland/user.h).
+
+## Still to do
+
+- Connect storage drivers to the filesystem and support persistent writes.
+- Move the interactive shell into user space and add pipes and signal handling.
+- Add SMP support and more hardware drivers.
+
+Only the first 1 GB of RAM is managed. The interactive shell runs in kernel
+space, and boot-module files are read-only.
 
 ## Screenshots
-
-![kmOS logo and system info in QEMU](media/fetch.png)
 
 Memory, processes and uptime:
 
 ![kmOS shell running mem, ps and uptime](media/shell.png)
 
 <details>
-<summary>Earlier boots</summary>
+<summary>Earlier versions</summary>
 
-v0.1:
+### v0.1
 
 ![kmOS v0.1 boot screen](media/v0.1-screengrab.png)
 
-v0.1.1:
+### v0.1.1
 
 ![kmOS v0.1.1 boot screen](media/v0.1.1-screengrab.png)
 
 </details>
+
+## License
 
 Apache License 2.0.
