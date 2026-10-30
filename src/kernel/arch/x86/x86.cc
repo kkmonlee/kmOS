@@ -4,6 +4,7 @@
 
 extern "C" void _asm_int_32();
 extern "C" void _asm_int_33();
+extern "C" void _asm_int_128();
 extern "C" u32 exception_stubs[IDTSIZE];
 extern "C" char boot_stack_top;
 extern "C" void load_gdt(const gdtr *);
@@ -120,6 +121,7 @@ extern "C"
     }
     init_idt_desc(0x08, (u32)_asm_int_32, INTGATE, &kidt[32]);
     init_idt_desc(0x08, (u32)_asm_int_33, INTGATE, &kidt[33]);
+    init_idt_desc(0x08, (u32)_asm_int_128, 0xEE00, &kidt[128]);
     kidtr.limite = sizeof(kidt) - 1;
     kidtr.base = (u32)kidt;
     asm volatile("lidt (%0)" :: "r"(&kidtr) : "memory");

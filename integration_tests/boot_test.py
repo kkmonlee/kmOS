@@ -123,6 +123,8 @@ def boot(args, ram, machine="pc"):
         vm.wait(lambda text: "[BOOT] Ready" in text and "kmOS:/$ " in text)
         assert "[CPU] Exception frames verified" in vm.text()
         assert "[VMM] Page tables verified" in vm.text()
+        if args.iso:
+            assert "Hello from ring 3" in vm.text() and "[USER] Reaped init" in vm.text(), vm.text()
         registers = vm.monitor("info registers")
         cr0 = int(re.search(r"CR0=([0-9a-fA-F]+)", registers)[1], 16)
         assert cr0 & 0x80010000 == 0x80010000, registers
@@ -231,6 +233,201 @@ def cow(args, ram):
     print(f"PASS COW ownership, isolation, rollback and cleanup: {ram} MB", flush=True)
 
 
+def elf(args, ram):
+    with VM(args, f"elf-{ram}", ram, append="test=elf") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[ELF] validation, mappings, stack and rollback verified" in text, text
+        assert "[PANIC]" not in text, text
+    print(f"PASS ELF validation, mappings, stack and rollback: {ram} MB", flush=True)
+
+
+def user(args, module, name="hello", status=0, ram=64, machine="pc", vector=None, rejected=False):
+    with VM(args, f"user-{name}-{ram}", ram, machine, append="user", module=module) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text)
+        assert "[BOOT] Ready" in text and "[PANIC]" not in text, text
+        assert "Frame leak" not in text and "Invalid magic" not in text and "Invalid block" not in text, text
+        if rejected:
+            assert "[USER] Rejected ELF" in text and "[USER] Started" not in text, text
+        else:
+            assert f"[USER] Exit status={status:08x}" in text and "[USER] Reaped init" in text, text
+            if name == "hello":
+                assert "Hello from ring 3" in text, text
+            if vector is not None:
+                assert f"[USER] fault vector={vector:08x}" in text, text
+        text = vm.serial_command("echo survived")
+        assert "\nsurvived\n" in text, text
+        text = vm.serial_command("ps")
+        assert "init" not in text.split("ps\n")[-1], text
+        text = vm.serial_command("uptime")
+        ticks = int(re.findall(r"Timer ticks: (\d+)", text)[-1])
+        time.sleep(0.03)
+        text = vm.serial_command("uptime")
+        assert int(re.findall(r"Timer ticks: (\d+)", text)[-1]) > ticks, text
+    print(f"PASS user {name}, kernel survives and reaps: {machine}, {ram} MB", flush=True)
+
+
+def user_failures(args, temp):
+    linker = Path(__file__).resolve().parents[1] / "src/userland/linker.ld"
+    cases = (
+        ("unknown-syscalls", """
+            mov eax, 100
+            int 0x80
+            cmp eax, -38
+            jne failed
+            mov eax, -1
+            int 0x80
+            cmp eax, -38
+            jne failed
+            mov eax, 2
+            int 0x80
+            cmp eax, -38
+            jne failed
+            mov eax, 4
+            mov ebx, 9
+            xor ecx, ecx
+            mov edx, 1
+            int 0x80
+            cmp eax, -9
+            jne failed
+            mov eax, 4
+            mov ebx, 1
+            xor ecx, ecx
+            xor edx, edx
+            int 0x80
+            test eax, eax
+            jnz failed
+        """, 0, None),
+        ("null-pointer", "mov ecx, 0\nmov edx, 1\njmp write", 142, None),
+        ("kernel-pointer", "mov ecx, 0x100000\nmov edx, 1\njmp write", 142, None),
+        ("unmapped-pointer", "mov ecx, 0x80000000\nmov edx, 1\njmp write", 142, None),
+        ("overflow-pointer", "mov ecx, message\nmov edx, 0xffffffff\njmp write", 142, None),
+        ("cross-page-pointer", "mov ecx, 0xdfffffff\nmov edx, 2\njmp write", 142, None),
+        ("cross-gap-pointer", "mov ecx, 0x40001fff\nmov edx, 2\njmp write", 142, None),
+        ("kernel-read", "mov eax, [0x100000]", 142, 14),
+        ("kernel-write", "mov dword [0x100000], 0", 142, 14),
+        ("readonly-text", "mov byte [_start], 0", 142, 14),
+        ("stack-guard", "mov dword [0xdfffbffc], 0", 142, 14),
+        ("unmapped-read", "mov eax, [0x80000000]", 142, 14),
+        ("invalid-opcode", "ud2", 134, 6),
+        ("privileged-cli", "cli", 141, 13),
+        ("privileged-io", "mov dx, 0x3f8\nout dx, al", 141, 13),
+        ("privileged-gate", "int 0x20", 141, 13),
+        ("exit-code", "mov ebx, 42\njmp exit", 42, None),
+        ("writes", """
+            mov ecx, 0xdfffefff
+            mov byte [ecx], 'A'
+            mov byte [ecx + 1], 10
+            mov eax, 4
+            mov ebx, 1
+            mov edx, 2
+            int 0x80
+            cmp eax, 2
+            jne failed
+            mov eax, 4
+            mov ebx, 2
+            mov ecx, message
+            mov edx, 10
+            int 0x80
+            cmp eax, 10
+            jne failed
+            mov eax, 4
+            mov ebx, 1
+            mov ecx, 0xdfffc000
+            mov edx, 8192
+            int 0x80
+            cmp eax, 4096
+            jne failed
+        """, 0, None),
+        ("registers", """
+            xor eax, eax
+            mov fs, ax
+            mov gs, ax
+            mov ebx, 0x12345678
+            mov edx, 0x23456789
+            mov esi, 0x3456789a
+            mov edi, 0x456789ab
+            mov ebp, 0x56789abc
+            mov ecx, 200000000
+            std
+        spin:
+            dec ecx
+            jnz spin
+            pushfd
+            pop eax
+            test eax, 0x400
+            jz failed
+            cld
+            mov ax, fs
+            test ax, ax
+            jnz failed
+            mov ax, gs
+            test ax, ax
+            jnz failed
+            mov eax, 0xffffffff
+            int 0x80
+            cmp eax, -38
+            jne failed
+            cmp ebx, 0x12345678
+            jne failed
+            cmp edx, 0x23456789
+            jne failed
+            cmp esi, 0x3456789a
+            jne failed
+            cmp edi, 0x456789ab
+            jne failed
+            cmp ebp, 0x56789abc
+            jne failed
+        """, 0, None),
+    )
+    template = """bits 32
+section .text
+global _start
+_start:
+{body}
+    xor ebx, ebx
+    jmp exit
+failed:
+    mov ebx, 1
+exit:
+    mov eax, 1
+    int 0x80
+    ud2
+write:
+    mov eax, 4
+    mov ebx, 1
+    int 0x80
+    jmp failed
+section .rodata
+message: db 'user test', 10
+section .data
+    dd 0
+section .note.GNU-stack noalloc noexec nowrite progbits
+"""
+    for name, body, status, vector in cases:
+        source = temp / f"{name}.asm"
+        obj = source.with_suffix(".o")
+        module = source.with_suffix(".elf")
+        source.write_text(template.format(body=body))
+        subprocess.run(["nasm", "-f", "elf32", str(source), "-o", str(obj)], check=True)
+        subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
+                        str(linker), "-o", str(module), str(obj)], check=True)
+        user(args, module, name, status, vector=vector)
+    bad = temp / "malformed.elf"
+    bad.write_bytes(b"\x7fELF")
+    user(args, bad, "malformed", rejected=True)
+    hello = linker.parent / "hello.elf"
+    modules = ",".join(str(path) for path in (hello, bad, temp / "invalid-opcode.elf", hello))
+    with VM(args, "user-multiple", append="user", module=modules) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text)
+        assert text.count("Hello from ring 3") == 2, text
+        assert text.count("[USER] Reaped init") == 3 and "[USER] Rejected ELF" in text, text
+        assert "[USER] Exit status=00000086" in text, text
+        assert "[PANIC]" not in text and "Frame leak" not in text, text
+        assert "\nsurvived\n" in vm.serial_command("echo survived"), vm.text()
+    print("PASS successive user programs after rejection and faults", flush=True)
+
+
 def fault(args, case, vector, error, address=None, ram=64):
     with VM(args, f"fault-{case}", ram, append=f"test={case}") as vm:
         vm.wait(lambda text: "[PANIC]" in text and "\n" in text.split("[PANIC]", 1)[1])
@@ -256,6 +453,7 @@ def main():
     image.add_argument("--kernel", type=Path)
     image.add_argument("--iso", type=Path)
     parser.add_argument("--qemu", default="qemu-system-i386")
+    parser.add_argument("--cross", default="i686-elf")
     parser.add_argument("--results", type=Path, default=Path("integration_tests/results/paging"))
     args = parser.parse_args()
     if not shutil.which(args.qemu):
@@ -271,7 +469,12 @@ def main():
         heap(args, ram)
         filesystem(args, ram)
         cow(args, ram)
+        elf(args, ram)
+        user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", ram=ram)
     boot(args, 64, "q35")
+    user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")
+    with tempfile.TemporaryDirectory(prefix="kmos-user-") as temp:
+        user_failures(args, Path(temp))
     with tempfile.TemporaryDirectory(prefix="kmos-module-") as temp:
         module = Path(temp) / "module.bin"
         module.write_bytes(bytes(range(256)) * 4096)

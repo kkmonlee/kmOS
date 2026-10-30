@@ -37,6 +37,8 @@ extern "C"
     void *sigfn[32];
     void *vinfo;
     u32 interrupt_stack;
+    u32 kernel_stack_top;
+    u32 syscall_frame;
   } __attribute__((packed));
 }
 

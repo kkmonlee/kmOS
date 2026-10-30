@@ -1,11 +1,14 @@
-USERLAND_OBJS := 
-
-OBJS := $(OBJS) $(USERLAND_OBJS)
+CROSS ?= i686-elf
 
 .PHONY: all clean
 
-all:
-	@echo "Userland build complete"
+all: hello.elf
+
+hello.o: hello.asm
+	nasm -f elf32 $< -o $@
+
+hello.elf: hello.o linker.ld
+	$(CROSS)-ld -m elf_i386 -z noexecstack -T linker.ld -o $@ hello.o
 
 clean:
-	@echo "Userland clean complete"
+	rm -f hello.o hello.elf

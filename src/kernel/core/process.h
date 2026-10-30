@@ -10,7 +10,7 @@
 
 #define ZOMBIE PROC_STATE_ZOMBIE
 #define CHILD PROC_STATE_RUN
-#define RUNNING 1
+#define RUNNING PROC_STATE_RUN
 #define SLEEPING 2
 #define READY 4
 
@@ -37,7 +37,7 @@ public:
   u32 remove() override;
   void scan() override;
 
-  u32 create(char *file, int argc, char **argv);
+  u32 create(const void *file, u32 size, int argc, const char *const *argv);
   void sendSignal(int sig);
   u32 wait();
   u32 addFile(File *fp, u32 m);
@@ -45,7 +45,8 @@ public:
   void deleteFile(u32 fd);
   openfile *getFileInfo(u32 fd);
 
-  void exit();
+  void exit(int status = 0);
+  int getExitStatus();
   int fork();
 
   void setState(u8 st);
@@ -74,6 +75,7 @@ protected:
 
   u32 pid;
   u8 state;
+  int exit_status;
   Process *pparent;
   Process *pnext;
   openfile openfp[CONFIG_MAX_FILE];

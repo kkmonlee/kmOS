@@ -105,16 +105,21 @@ void call_write()
     return;
   }
 
-  File *fp = p->getFile(fd);
-  if (fp == NULL)
-  {
-    arch.setRet(-1);
+  if (fd != 1 && fd != 2) {
+    arch.setRet((u32)-9);
     return;
   }
-  openfile *info = p->getFileInfo(fd);
-  u32 ret = fp->write(info->ptr, buf, size);
-  info->ptr = info->ptr + ret;
-  arch.setRet(ret);
+  if (!size) {
+    arch.setRet(0);
+    return;
+  }
+  if (!vmm.user_range(p->getPInfo()->pd, (u32)buf, size)) {
+    p->exit(142);
+    return;
+  }
+  u32 count = size > 4096 ? 4096 : size;
+  for (u32 i = 0; i < count; ++i) io.putc(buf[i]);
+  arch.setRet(count);
 }
 
 /*
@@ -171,7 +176,7 @@ void call_exit()
   code = arch.getArg(0);
 
   Process *p = arch.pcurrent;
-  p->exit();
+  p->exit(code);
   return;
 }
 

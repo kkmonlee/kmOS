@@ -3,10 +3,12 @@
 #include <vmm.h>
 #include <pit.h>
 #include <runtime/alloc.h>
+#include <elf_loader.h>
 
 extern "C" {
     void *memset(void *s, int c, int n);
     u64 get_system_ticks();
+    extern char boot_stack_top;
 }
 
 extern VMM vmm;
@@ -152,6 +154,7 @@ void Architecture::ensure_idle_process()
     info->regs.gs = 0x10;
     info->regs.cr3 = current_directory ? current_directory->physical_address : 0;
     info->vinfo = stack;
+    info->kernel_stack_top = stack_top;
 
     idle->setPParent(nullptr);
     idle->setState(READY);
@@ -202,44 +205,49 @@ char *Architecture::detect()
     return (char *)"Generic x86";
 }
 
-u32 Architecture::getArg(u32 /*argnum*/)
+u32 Architecture::getArg(u32 argnum)
 {
-    return 0;
+    if (!pcurrent || !pcurrent->getPInfo()->syscall_frame) return 0;
+    const InterruptFrame *frame = (const InterruptFrame *)pcurrent->getPInfo()->syscall_frame;
+    switch (argnum) {
+    case 0: return frame->ebx;
+    case 1: return frame->ecx;
+    case 2: return frame->edx;
+    case 3: return frame->esi;
+    case 4: return frame->edi;
+    case 5: return frame->ebp;
+    default: return 0;
+    }
 }
 
-int Architecture::createProc(process_st *info, char * /*file*/, int /*argc*/, char ** /*argv*/)
+int Architecture::createProc(process_st *info, const void *file, u32 size, int argc, const char *const *argv)
 {
-    if (info == nullptr)
-    {
+    if (!info || info->vinfo || !load_elf(file, size, info, argc, argv)) return 0;
+    u8 *stack = (u8 *)kmalloc(KERNEL_STACK_SIZE);
+    if (!stack) {
+        vmm.destroy_page_directory(info->pd);
+        memset(info, 0, sizeof(*info));
         return 0;
     }
-
-    memset(&(info->regs), 0, sizeof(info->regs));
-
-    info->regs.cs = 0x08;
-    info->regs.ss = 0x10;
-    info->regs.ds = 0x10;
-    info->regs.es = 0x10;
-    info->regs.fs = 0x10;
-    info->regs.gs = 0x10;
+    info->vinfo = stack;
+    info->kernel_stack_top = (u32)(stack + KERNEL_STACK_SIZE);
+    info->interrupt_stack = info->kernel_stack_top - sizeof(InterruptFrame);
+    memset((void *)info->interrupt_stack, 0, sizeof(InterruptFrame));
+    info->regs.cs = 0x23;
+    info->regs.ss = 0x2b;
+    info->regs.ds = 0x2b;
+    info->regs.es = 0x2b;
+    info->regs.fs = 0x2b;
+    info->regs.gs = 0x2b;
     info->regs.eflags = 0x202;
-
-    if (info->pd == nullptr)
-    {
-        info->pd = current_directory;
-    }
-
-    if (info->pd != nullptr)
-    {
-        info->regs.cr3 = info->pd->physical_address;
-    }
-
+    info->regs.cr3 = info->pd->physical_address;
     return 1;
 }
 
 void Architecture::setRet(u32 value)
 {
-    (void)value;
+    if (pcurrent && pcurrent->getPInfo()->syscall_frame)
+        ((InterruptFrame *)pcurrent->getPInfo()->syscall_frame)->eax = value;
 }
 
 void Architecture::change_process_father(Process *child, Process *new_father)
@@ -354,6 +362,10 @@ void Architecture::destroy_process(Process *proc)
     }
 
     u32 interrupt_flags = irq_save();
+    if (proc == pcurrent) {
+        irq_restore(interrupt_flags);
+        return;
+    }
     remove_process(proc);
     irq_restore(interrupt_flags);
 
@@ -381,7 +393,7 @@ void Architecture::destroy_all_zombie()
     do
     {
         Process *next = cursor->getPNext();
-        if (cursor != idle_process && cursor->getState() == ZOMBIE)
+        if (cursor != idle_process && cursor != pcurrent && cursor->getState() == ZOMBIE)
         {
             remove_process(cursor);
             cursor->setPNext(pending_cleanup);
@@ -456,17 +468,18 @@ InterruptFrame *Architecture::load_process_context(Process *proc)
     frame->edi = info->regs.edi;
     frame->eip = info->regs.eip;
 
-    u32 data_selector = info->regs.ds ? info->regs.ds : 0x10;
+    u32 data_selector = (info->regs.cs & 3) ? info->regs.ds : (info->regs.ds ? info->regs.ds : 0x10);
     frame->cs = info->regs.cs ? info->regs.cs : 0x08;
     frame->ds = data_selector;
-    frame->es = info->regs.es ? info->regs.es : data_selector;
-    frame->fs = info->regs.fs ? info->regs.fs : data_selector;
-    frame->gs = info->regs.gs ? info->regs.gs : data_selector;
+    frame->es = (info->regs.cs & 3) ? info->regs.es : data_selector;
+    frame->fs = (info->regs.cs & 3) ? info->regs.fs : data_selector;
+    frame->gs = (info->regs.cs & 3) ? info->regs.gs : data_selector;
     if (info->regs.cs & 3) {
         frame->ss = info->regs.ss;
         frame->useresp = info->regs.esp;
     }
     frame->eflags = (info->regs.eflags ? info->regs.eflags : 0x202) | 0x200;
+    default_tss.esp0 = info->kernel_stack_top ? info->kernel_stack_top : (u32)&boot_stack_top;
 
     if (info->pd != nullptr && info->pd != current_directory)
     {
@@ -512,4 +525,47 @@ InterruptFrame *Architecture::handle_timer_interrupt(InterruptFrame *frame)
 
     pcurrent = next;
     return load_process_context(pcurrent);
+}
+
+InterruptFrame *Architecture::finish_process(int status) {
+    pcurrent->exit(status);
+    Process *next = pcurrent->schedule();
+    pcurrent = next;
+    ticks_since_switch = 0;
+    return load_process_context(next);
+}
+
+int Architecture::fork(process_st *info, process_st *father) {
+    if (!info || !info->pd || !father || !father->syscall_frame) return 0;
+    const InterruptFrame *frame = (const InterruptFrame *)father->syscall_frame;
+    if ((frame->cs & 3) != 3) return 0;
+    u8 *stack = (u8 *)kmalloc(KERNEL_STACK_SIZE);
+    if (!stack) return 0;
+    info->vinfo = stack;
+    info->kernel_stack_top = (u32)(stack + KERNEL_STACK_SIZE);
+    info->interrupt_stack = info->kernel_stack_top - sizeof(InterruptFrame);
+    info->regs.eax = 0;
+    info->regs.ecx = frame->ecx;
+    info->regs.edx = frame->edx;
+    info->regs.ebx = frame->ebx;
+    info->regs.esp = frame->useresp;
+    info->regs.ebp = frame->ebp;
+    info->regs.esi = frame->esi;
+    info->regs.edi = frame->edi;
+    info->regs.eip = frame->eip;
+    info->regs.eflags = frame->eflags;
+    info->regs.cs = frame->cs;
+    info->regs.ss = frame->ss;
+    info->regs.ds = frame->ds;
+    info->regs.es = frame->es;
+    info->regs.fs = frame->fs;
+    info->regs.gs = frame->gs;
+    info->regs.cr3 = info->pd->physical_address;
+    info->b_exec = father->b_exec;
+    info->e_exec = father->e_exec;
+    info->b_bss = father->b_bss;
+    info->e_bss = father->e_bss;
+    info->b_heap = father->b_heap;
+    info->e_heap = father->e_heap;
+    return 1;
 }

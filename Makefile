@@ -2,12 +2,14 @@ CROSS ?= i686-elf
 QEMU ?= qemu-system-i386
 RAM ?= 64M
 KERNEL = src/kernel/kernel.elf
+USER_PROGRAM = src/userland/hello.elf
 export CROSS
 
 .PHONY: all build run debug test iso test-iso clean check-tools help
 
 all: check-tools
 	$(MAKE) -C src/kernel
+	$(MAKE) -C src/userland
 
 build: all
 
@@ -17,16 +19,16 @@ check-tools:
 	done
 
 run: all
-	$(QEMU) -kernel $(KERNEL) -m $(RAM) -serial stdio -no-reboot
+	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append user -m $(RAM) -serial stdio -no-reboot
 
 debug: all
-	$(QEMU) -kernel $(KERNEL) -m $(RAM) -display none -serial mon:stdio -no-reboot
+	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append user -m $(RAM) -display none -serial mon:stdio -no-reboot
 
 test: all
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
 	$(CXX) -std=c++17 -fno-builtin -I src/kernel integration_tests/physical_memory_test.cc -o "$$test_dir/memory"; \
 	"$$test_dir/memory"
-	python3 integration_tests/boot_test.py --qemu $(QEMU) --kernel $(KERNEL)
+	python3 integration_tests/boot_test.py --qemu $(QEMU) --cross $(CROSS) --kernel $(KERNEL)
 
 iso: all
 	./scripts/build-iso.sh
@@ -36,6 +38,7 @@ test-iso: iso
 
 clean:
 	$(MAKE) -C src/kernel clean
+	$(MAKE) -C src/userland clean
 	rm -f src/sdk/bootdisk/kernel.elf iso/boot/kernel.elf kmos.iso
 
 help:

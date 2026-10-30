@@ -1,4 +1,4 @@
-extern exception_handler, isr_timer_int
+extern exception_handler, isr_timer_int, isr_syscall
 
 section .text
 
@@ -68,9 +68,15 @@ exception_common:
     sub esp, 12
     push ebp
     call exception_handler
+    test eax, eax
+    jnz .resume_process
     mov esp, ebp
     RESTORE_REGS
     add esp, 8
+    iret
+.resume_process:
+    mov esp, eax
+    RESTORE_REGS
     iret
 
 global _asm_int_32
@@ -88,6 +94,18 @@ _asm_int_32:
     iret
 
 global test_gp, test_gp_fault, test_gp_resume
+global _asm_int_128
+_asm_int_128:
+    SAVE_REGS
+    mov ebp, esp
+    and esp, -16
+    sub esp, 12
+    push ebp
+    call isr_syscall
+    mov esp, eax
+    RESTORE_REGS
+    iret
+
 test_gp:
     mov ax, 0xfff8
 test_gp_fault:

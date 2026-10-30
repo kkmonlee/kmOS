@@ -278,6 +278,22 @@ bool VMM::verify_page_tables() {
     return valid && frames_used == before;
 }
 
+bool VMM::user_range(page_directory *pd, u32 address, u32 size, bool writable) {
+    if (!pd || address < USER_OFFSET || address >= USER_STACK || size > USER_STACK - address)
+        return false;
+    if (!size) return true;
+    u32 last = (address + size - 1) & ~(PAGESIZE - 1);
+    for (u32 page = address & ~(PAGESIZE - 1);; page += PAGESIZE) {
+        const page_directory_entry &directory = pd->tables[VADDR_PD_OFFSET(page)];
+        page_table_entry *table = pd->page_tables[VADDR_PD_OFFSET(page)];
+        if (!directory.present || !directory.user || directory.page_size || !table ||
+            (writable && !directory.writable)) return false;
+        const page_table_entry &entry = table[VADDR_PT_OFFSET(page)];
+        if (!entry.present || !entry.user || (writable && !entry.writable)) return false;
+        if (page == last) return true;
+    }
+}
+
 int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
     if (!current_directory || (error_code & 8)) return -1;
     u32 page_addr = fault_addr & ~0xFFF;

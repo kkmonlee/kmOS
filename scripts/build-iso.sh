@@ -3,10 +3,12 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 make -C "$repo_dir/src/kernel"
+make -C "$repo_dir/src/userland"
 iso_stage="$(mktemp -d)"
 trap 'rm -rf "$iso_stage"' EXIT
 mkdir -p "$iso_stage/tree/boot/grub"
 cp "$repo_dir/src/kernel/kernel.elf" "$iso_stage/tree/boot/kernel.elf"
+cp "$repo_dir/src/userland/hello.elf" "$iso_stage/tree/boot/hello.elf"
 cp "$repo_dir/iso/boot/grub/grub.cfg" "$iso_stage/tree/boot/grub/grub.cfg"
 
 if command -v grub-mkrescue >/dev/null; then

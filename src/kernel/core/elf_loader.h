@@ -51,9 +51,9 @@ typedef struct
   u32 entsize;
 } Elf32_Scdr;
 
-int is_elf(char *file);
-u32 load_elf(char *file, process_st *proc);
+bool is_elf(const void *file, u32 size);
+u32 load_elf(const void *file, u32 size, process_st *proc, int argc, const char *const *argv);
 int execv(char *file, int argc, char **argv);
-void execv_module(u32 entry, int argc, char **argv);
+int execv_module(const void *file, u32 size, int argc, const char *const *argv);
 
 #endif

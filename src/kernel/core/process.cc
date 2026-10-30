@@ -32,6 +32,7 @@ Process::~Process()
   if (info.pd) {
     vmm.destroy_page_directory(info.pd);
   }
+  kfree(info.vinfo);
   
   delete ipc;
   arch.change_process_father(this, pparent);
@@ -42,6 +43,7 @@ Process::Process(char *n) : File(n, TYPE_PROCESS)
   memset(&info, 0, sizeof(info));
   pid = proc_pid++;
   state = SLEEPING;
+  exit_status = 0;
   pparent = 0;
   pnext = 0;
   cdir = arch.pcurrent ? arch.pcurrent->getCurrentDir() : fsm.getRoot();
@@ -136,6 +138,7 @@ u32 Process::wait()
 
 int Process::fork()
 {
+  if (this != arch.pcurrent || !info.syscall_frame || !info.pd) return -1;
   Process *child = new Process(const_cast<char*>("forked_process"));
   if (!child) {
     return -1;
@@ -165,23 +168,20 @@ int Process::fork()
   
   child->info.pd = child_pd;
   
-  int ret = arch.createProc(&child->info, nullptr, 0, nullptr);
+  int ret = arch.fork(&child->info, &info);
   if (ret == 1) {
     child->setState(READY);
     arch.addProcess(child);
-    if (pparent != NULL) {
-      pparent->sendSignal(SIGCHLD);
-    }
     return child->pid;
   } else {
-    child->setState(ZOMBIE);
-    return 0;
+    delete child;
+    return -1;
   }
 }
 
-u32 Process::create(char *file, int argc, char **argv)
+u32 Process::create(const void *file, u32 size, int argc, const char *const *argv)
 {
-  int ret = arch.createProc(&info, file, argc, argv);
+  int ret = arch.createProc(&info, file, size, argc, argv);
   if (ret == 1)
   {
     setState(READY);
@@ -190,6 +190,7 @@ u32 Process::create(char *file, int argc, char **argv)
   else
   {
     setState(ZOMBIE);
+    return ERROR_PARAM;
   }
 
   if (pparent != NULL)
@@ -198,7 +199,6 @@ u32 Process::create(char *file, int argc, char **argv)
     {
       memcpy((char *)&openfp[i], (char *)pparent->getFileInfo(i), sizeof(openfile));
     }
-    addFile(this, 0);
   }
   else
   {
@@ -211,13 +211,19 @@ u32 Process::create(char *file, int argc, char **argv)
   return RETURN_OK;
 }
 
-void Process::exit()
+void Process::exit(int status)
 {
+  exit_status = status;
   setState(ZOMBIE);
   if (pparent != NULL)
   {
     pparent->sendSignal(SIGCHLD);
   }
+}
+
+int Process::getExitStatus()
+{
+  return exit_status;
 }
 
 Process *Process::schedule()

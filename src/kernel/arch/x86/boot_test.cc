@@ -7,6 +7,7 @@ extern "C" u32 get_page_fault_count();
 bool verify_heap();
 bool verify_filesystem();
 bool verify_cow();
+bool verify_elf();
 
 static void finish(bool passed) {
     serial::write(passed ? "[TEST] passed\n" : "[TEST] failed\n");
@@ -99,6 +100,7 @@ void run_boot_test(const multiboot_info *boot) {
     const char *args = (const char *)boot->cmdline;
     if (boot_has_argument(args, "test=heap")) finish(verify_heap());
     if (boot_has_argument(args, "test=cow")) finish(verify_cow());
+    if (boot_has_argument(args, "test=elf")) finish(verify_elf());
     if (boot_has_argument(args, "test=paging")) {
         if ((boot->flags & 8) && boot->mods_count) {
             serial::write("[TEST] module hash=");

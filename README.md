@@ -29,6 +29,14 @@ Run `fetch` or `lsb_release -a` in the shell for system info.
 Paging is on. Only the first 1 GB of RAM is managed for now.
 The shell runs in kernel space. Userland and filesystems still need work.
 
+`make run` and the GRUB ISO load `src/userland/hello.elf` as a boot module.
+It runs in ring 3, prints a message, exits, and returns to the kernel shell.
+The loader accepts static i386 ELF executables with separate loadable pages.
+User programs currently have `write` (syscall 4, console descriptors 1 and 2)
+and `exit` (syscall 1) through `int 0x80`. EAX selects the syscall,
+EBX/ECX/EDX carry arguments, and EAX holds the result.
+Invalid pointers and user faults terminate the process.
+
 ## Screenshots
 
 ![kmOS logo and system info in QEMU](media/fetch.png)
