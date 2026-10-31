@@ -25,17 +25,9 @@ make run
 
 This builds the kernel and user programs, then boots QEMU with 64 MB of RAM.
 User `init` runs `hello` and `cat`, waits for them to finish, and exits to the
-kernel shell. No disk image or root access is needed.
+kernel shell. No disk image or root access is needed. 
 
-| Command | What it does |
-| --- | --- |
-| `make` | Build the kernel and user programs |
-| `make run RAM=128M` | Boot with 128 MB of RAM |
-| `make debug` | Boot in the terminal; press Ctrl-a, then x to quit |
-| `make test` | Run memory and QEMU integration tests |
-| `make iso` | Build a bootable GRUB ISO |
-| `make test-iso` | Build and test the GRUB ISO |
-| `make version` | Show the version and build identity |
+You can also try `make`, `make run RAM=128M`, `make debug`, `make test`, `make iso`, `make test-iso`, `make version`
 
 ISO builds need GRUB and xorriso, or a running Docker/OrbStack installation.
 
@@ -44,14 +36,12 @@ In the shell, try `help`, `ls`, `cat /etc/motd`, `mem`, `ps` or `uptime`.
 
 ## What works
 
-| Area | Current support |
-| --- | --- |
-| Boot | Multiboot/GRUB, VGA and serial consoles |
-| Memory | Paging, physical frame tracking, heap allocators and copy-on-write |
-| Processes | Ring-3 ELF programs, timer scheduling, `fork`, `execve` and `waitpid` |
-| Files | Paths, working directories, shared descriptors, `dup2` and close-on-exec |
-| Userland | `init`, `hello` and `cat`, loaded from boot modules under `/bin` |
-| Input | Keyboard and serial input |
+- Multiboot/GRUB, VGA and serial consoles 
+- Paging, physical frame tracking, heap allocators and copy-on-write 
+- Ring-3 ELF programs, timer scheduling, `fork`, `execve` and `waitpid` 
+- Paths, working directories, shared descriptors, `dup2` and close-on-exec 
+- `init`, `hello` and `cat`, loaded from boot modules under `/bin` 
+- Keyboard and serial input 
 
 User programs have separate address spaces and guarded stacks. Invalid pointers
 and user faults terminate the process. The supported syscall wrappers are in
