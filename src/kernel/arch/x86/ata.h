@@ -24,6 +24,7 @@ private:
     bool wait_busy();
     bool wait_data_ready();
     void select_drive(u32 lba);
+    bool valid_range(u32 lba, u32 count) const;
 
     u16 io_base_;
     u16 ctrl_base_;

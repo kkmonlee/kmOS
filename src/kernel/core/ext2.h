@@ -113,13 +113,13 @@ protected:
 
 class Ext2Directory : public Ext2Node {
 public:
-    Ext2Directory(const char* name, Ext2Mount* mount, u32 inode, bool owns_mount);
+    Ext2Directory(const char* name, Ext2Mount* mount, u32 inode);
     virtual ~Ext2Directory();
+    bool load();
     virtual void scan() override;
 
 private:
     bool loaded_;
-    bool owns_mount_;
 };
 
 class Ext2RegularFile : public Ext2Node {

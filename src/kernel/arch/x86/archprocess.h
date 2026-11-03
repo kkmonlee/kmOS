@@ -39,6 +39,8 @@ extern "C"
     u32 interrupt_stack;
     u32 kernel_stack_top;
     u32 syscall_frame;
+    u8 fpu_state[512 + 15];
+    bool fpu_initialized;
   } __attribute__((packed));
 }
 

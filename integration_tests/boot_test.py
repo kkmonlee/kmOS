@@ -11,7 +11,7 @@ import time
 
 
 class VM:
-    def __init__(self, args, name, ram=64, machine="pc", append="", module=None):
+    def __init__(self, args, name, ram=64, machine="pc", append="", module=None, disk=None, cpu=None):
         self.temp = tempfile.TemporaryDirectory(prefix="kmos-", dir="/tmp")
         if args.iso:
             name = "iso-" + name
@@ -24,6 +24,10 @@ class VM:
                    "-display", "none", "-serial", "stdio", "-monitor", "none",
                    "-qmp", f"unix:{qmp_path},server=on,wait=off", "-no-reboot",
                    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
+        if disk:
+            command += ["-drive", f"file={disk},format=raw,if=ide,index=0"]
+        if cpu:
+            command += ["-cpu", cpu]
         if args.iso:
             command += ["-cdrom", str(args.iso), "-boot", "d"]
         else:
@@ -251,17 +255,24 @@ def process_files(args, ram):
     print(f"PASS descriptor ownership, close, removal and cwd: {ram} MB", flush=True)
 
 
+def build_user_test(args, temp, source, name):
+    repo = Path(__file__).resolve().parents[1]
+    obj = temp / (name + ".o")
+    program = temp / (name + ".elf")
+    subprocess.run([args.cross + "-gcc", "-std=c11", "-m32", "-O2", "-g", "-Wall", "-Wextra",
+                    "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie", "-fno-stack-protector",
+                    "-I", str(repo / "src/userland"), "-c", str(repo / "integration_tests" / source),
+                    "-o", str(obj)], check=True)
+    subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
+                    str(repo / "src/userland/linker.ld"), "-o", str(program),
+                    str(repo / "src/userland/start.o"), str(obj)], check=True)
+    return program
+
+
 def build_process_tests(args, temp):
     repo = Path(__file__).resolve().parents[1]
     for source, name in (("process_test.c", "init"), ("exec_test.c", "exec-target")):
-        obj = temp / (name + ".o")
-        subprocess.run([args.cross + "-gcc", "-std=c11", "-m32", "-O2", "-g", "-Wall", "-Wextra",
-                        "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie", "-fno-stack-protector",
-                        "-I", str(repo / "src/userland"), "-c", str(repo / "integration_tests" / source),
-                        "-o", str(obj)], check=True)
-        subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
-                        str(repo / "src/userland/linker.ld"), "-o", str(temp / (name + ".elf")),
-                        str(repo / "src/userland/start.o"), str(obj)], check=True)
+        build_user_test(args, temp, source, name)
     return ",".join(str(path) for path in (temp / "init.elf", temp / "exec-target.elf",
                                           repo / "src/userland/hello.elf"))
 
@@ -288,6 +299,51 @@ def userland(args, ram=64):
             assert expected in text, text
         assert "[PANIC]" not in text and "Frame leak" not in text, text
     print(f"PASS user init, hello and cat: {ram} MB", flush=True)
+
+
+def storage(args, ram):
+    with VM(args, f"storage-{ram}", ram, append="test=storage") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[STORAGE] ext2 geometry, records, reads and errors verified" in text, text
+        assert "[PANIC]" not in text, text
+    print(f"PASS ext2 valid images, malformed metadata and I/O errors: {ram} MB", flush=True)
+
+
+def storage_and_user_regressions(args, temp):
+    disk = temp / "ata.img"
+    contents = bytearray(16 * 512)
+    contents[:512] = bytes([0x5a]) * 512
+    contents[-512:] = bytes([0x7b]) * 512
+    disk.write_bytes(contents)
+    with VM(args, "ata", append="test=ata", disk=disk) as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[STORAGE] ATA bounds, transfers and flush verified" in text, text
+        assert "[PANIC]" not in text, text
+    contents[512:1536] = bytes((i * 17 + 3) & 255 for i in range(1024))
+    assert disk.read_bytes() == contents, "ATA wrote outside the requested sectors"
+    print("PASS ATA address bounds, valid transfers and persisted contents", flush=True)
+
+    read_program = build_user_test(args, temp, "read_test.c", "read-test")
+    fpu_program = build_user_test(args, temp, "fpu_test.c", "init")
+    fpu_exec = temp / "fpu-exec.elf"
+    shutil.copyfile(fpu_program, fpu_exec)
+    for name, ram, module, marker, cpu in (
+        ("read-32", 32, read_program, "large read and COW verified", None),
+        ("read-64", 64, read_program, "large read and COW verified", None),
+        ("fpu-16", 16, f"{fpu_program},{fpu_exec}", "floating-point state verified", None),
+        ("fpu-64", 64, f"{fpu_program},{fpu_exec}", "floating-point state verified", None),
+        ("fpu-legacy", 64, f"{fpu_program},{fpu_exec}", "floating-point state verified",
+         "qemu32,-fxsr,-sse,-sse2"),
+        ("no-fpu", 64, Path(__file__).resolve().parents[1] / "src/userland/hello.elf",
+         "Hello from ring 3", "qemu32,-fpu"),
+    ):
+        with VM(args, name, ram, append="user", module=module, cpu=cpu) as vm:
+            text = vm.wait(lambda text: "[USER] Reaped init" in text or "[PANIC]" in text, timeout=30)
+            assert marker in text and "[USER] Exit status=00000000" in text, text
+            assert "[USER] Reaped init" in text and "[PANIC]" not in text and "Frame leak" not in text, text
+        print(f"PASS {name}: isolation, cleanup and kernel survival", flush=True)
 
 
 def elf(args, ram):
@@ -526,6 +582,7 @@ def main():
         paging(args, ram)
         heap(args, ram)
         filesystem(args, ram)
+        storage(args, ram)
         cow(args, ram)
         elf(args, ram)
         process_files(args, ram)
@@ -536,6 +593,8 @@ def main():
             processes(args, module, ram)
         processes(args, module, 64, "q35")
     userland(args)
+    with tempfile.TemporaryDirectory(prefix="kmos-regressions-") as temp:
+        storage_and_user_regressions(args, Path(temp))
     boot(args, 64, "q35")
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")
     with tempfile.TemporaryDirectory(prefix="kmos-user-") as temp:

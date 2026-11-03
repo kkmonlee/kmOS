@@ -217,6 +217,10 @@ static bool allocation_failures() {
     held = exhaust_frames();
     used = vmm.frames_used;
     CHECK(cow_manager.handle_cow_fault(child, USER_OFFSET, 3) == -1);
+    int error;
+    CHECK(vmm.user_write_range(child, USER_OFFSET, 1));
+    CHECK(!vmm.prepare_user_write(child, USER_OFFSET, 1, &error) && error == -12);
+    CHECK(!vmm.prepare_user_write(child, USER_OFFSET - 1, 1, &error) && error == -14);
     CHECK(vmm.frames_used == used && vmm.frame_references(first) == 2);
     CHECK(entry(child)->cow && matches(child, USER_OFFSET, 61));
     held = release_one(held);

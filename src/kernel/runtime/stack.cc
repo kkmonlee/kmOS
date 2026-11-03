@@ -233,11 +233,11 @@ u32 StackAllocator::get_total_bytes() const {
     return initialized ? current_frame->size : 0;
 }
 
-f32 StackAllocator::get_usage_percent() const {
+u32 StackAllocator::get_usage_percent() const {
     if (!initialized || current_frame->size == 0) {
-        return 0.0f;
+        return 0;
     }
-    return static_cast<f32>(get_used_bytes()) / current_frame->size * 100.0f;
+    return (u64)get_used_bytes() * 100 / current_frame->size;
 }
 
 bool StackAllocator::is_valid_ptr(void *ptr) const {
@@ -267,7 +267,7 @@ void StackAllocator::print_stats() const {
     io.print("  Current usage: %u bytes\n", stats.current_usage);
     io.print("  Frame count: %u\n", frame_count);
     io.print("  Checkpoint count: %u\n", stats.checkpoint_count);
-    io.print("  Usage: %.2f%%\n", get_usage_percent());
+    io.print("  Usage: %d%%\n", get_usage_percent());
     io.print("  Corruption checks: %u\n", stats.corruption_detected);
     io.print("  Total allocated: %llu bytes\n", stats.total_allocated_bytes);
     io.print("  Total freed: %llu bytes\n", stats.total_freed_bytes);

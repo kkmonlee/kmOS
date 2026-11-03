@@ -294,7 +294,7 @@ bool VMM::user_range(page_directory *pd, u32 address, u32 size, bool writable) {
     }
 }
 
-bool VMM::prepare_user_write(page_directory *pd, u32 address, u32 size) {
+bool VMM::user_write_range(page_directory *pd, u32 address, u32 size) {
     if (!user_range(pd, address, size)) return false;
     if (!size) return true;
     u32 last = (address + size - 1) & ~(PAGESIZE - 1);
@@ -303,10 +303,19 @@ bool VMM::prepare_user_write(page_directory *pd, u32 address, u32 size) {
         if (!pd->tables[VADDR_PD_OFFSET(page)].writable || (!entry.writable && !entry.cow)) return false;
         if (page == last) break;
     }
+    return true;
+}
+
+bool VMM::prepare_user_write(page_directory *pd, u32 address, u32 size, int *error) {
+    if (error) *error = -14;
+    if (!user_write_range(pd, address, size)) return false;
+    if (error) *error = -12;
+    if (!size) { if (error) *error = 0; return true; }
+    u32 last = (address + size - 1) & ~(PAGESIZE - 1);
     for (u32 page = address & ~(PAGESIZE - 1);; page += PAGESIZE) {
         page_table_entry &entry = pd->page_tables[VADDR_PD_OFFSET(page)][VADDR_PT_OFFSET(page)];
         if (!entry.writable && cow_manager.handle_cow_fault(pd, page, 3)) return false;
-        if (page == last) return true;
+        if (page == last) { if (error) *error = 0; return true; }
     }
 }
 

@@ -8,7 +8,7 @@ OBJDUMP=$(CROSS)-objdump
 
 ASMFLAG=-f elf32
 LDFLAG=-z noexecstack -m elf_i386 -T arch/x86/linker.ld
-FLAG=-MMD -MP -g -m32 -Wall -Wextra -O2 -fno-builtin -nostdinc -fno-stack-protector -nostdlib -fno-exceptions -fno-rtti $(INCDIR)
+FLAG=-MMD -MP -g -m32 -mgeneral-regs-only -Wall -Wextra -O2 -fno-builtin -nostdinc -fno-stack-protector -nostdlib -fno-exceptions -fno-rtti $(INCDIR)
 
 CFLAGS=$(FLAG)
 CXXFLAGS=$(FLAG)

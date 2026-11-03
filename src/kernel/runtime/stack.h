@@ -59,7 +59,7 @@ public:
     u32 get_used_bytes() const;
     u32 get_free_bytes() const;
     u32 get_total_bytes() const;
-    f32 get_usage_percent() const;
+    u32 get_usage_percent() const;
     
     bool is_valid_ptr(void *ptr) const;
     bool check_integrity() const;
@@ -142,7 +142,7 @@ public:
     u32 get_used() const { return top; }
     u32 get_peak() const { return peak; }
     u32 get_free() const { return SIZE - top; }
-    f32 get_usage_percent() const { return (f32)top / SIZE * 100.0f; }
+    u32 get_usage_percent() const { return (u64)top * 100 / SIZE; }
     
 private:
     alignas(STACK_ALIGNMENT) u8 buffer[SIZE];

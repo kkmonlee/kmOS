@@ -33,9 +33,10 @@ void call_read() {
   openfile *description = process->getFileInfo(fd);
   if (!file || description->mode == 1) { arch.setRet((u32)-9); return; }
   if (!size) { arch.setRet(0); return; }
-  if (bad_pointer(vmm.prepare_user_write(process->getPInfo()->pd, address, size))) return;
   u8 buffer[PAGESIZE];
   u32 count = size > sizeof(buffer) ? sizeof(buffer) : size;
+  page_directory *pd = process->getPInfo()->pd;
+  if (bad_pointer(vmm.user_write_range(pd, address, count))) return;
   if (file->getType() != TYPE_DEVICE && count > 0xffffffffU - description->ptr) {
     arch.setRet((u32)-75);
     return;
@@ -43,7 +44,12 @@ void call_read() {
   int result = file->read(description->ptr, buffer, count);
   if (result > (int)count) result = -5;
   if (result > 0) {
-    if (bad_pointer(vmm.copy_to_user(process->getPInfo()->pd, address, buffer, result))) return;
+    int error;
+    if (!vmm.prepare_user_write(pd, address, result, &error)) {
+      if (!bad_pointer(error != -14)) arch.setRet(error);
+      return;
+    }
+    if (bad_pointer(vmm.copy_to_user(pd, address, buffer, result))) return;
     if (file->getType() != TYPE_DEVICE) description->ptr += result;
   }
   arch.setRet(result);

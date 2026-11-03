@@ -7,6 +7,8 @@
 
 extern "C" {
     void *memset(void *s, int c, int n);
+    void *memcpy(void *dest, const void *src, int n);
+    regs_t cpu_cpuid(u32 code);
     u64 get_system_ticks();
     extern char boot_stack_top;
 }
@@ -15,6 +17,63 @@ extern VMM vmm;
 extern PIT pit;
 extern IO io;
 extern struct page_directory *current_directory;
+
+static bool has_fpu, has_fxsave;
+static u8 initial_fpu_state[512] __attribute__((aligned(16)));
+
+static void *fpu_state(process_st *info) {
+    return (void *)(((u32)info->fpu_state + 15) & ~15U);
+}
+
+static void restore_fpu(const void *state) {
+    if (has_fxsave) asm volatile("fxrstor (%0)" :: "r"(state) : "memory");
+    else asm volatile("frstor (%0)" :: "r"(state) : "memory");
+}
+
+static void save_fpu(process_st *info) {
+    if (!has_fpu) return;
+    void *state = fpu_state(info);
+    if (has_fxsave) asm volatile("fxsave (%0)" :: "r"(state) : "memory");
+    else asm volatile("fnsave (%0); frstor (%0)" :: "r"(state) : "memory");
+    info->fpu_initialized = true;
+}
+
+static void load_fpu(process_st *info) {
+    if (!has_fpu) return;
+    if (!info->fpu_initialized) {
+        memcpy(fpu_state(info), initial_fpu_state, sizeof(initial_fpu_state));
+        info->fpu_initialized = true;
+    }
+    restore_fpu(fpu_state(info));
+}
+
+static void init_fpu() {
+    u32 features = cpu_cpuid(1).edx;
+    has_fpu = (features & 1) != 0;
+    has_fxsave = (features & (1U << 24)) != 0;
+    u32 cr4;
+    asm volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 &= ~((1U << 9) | (1U << 10) | (1U << 18));
+    if (has_fpu && has_fxsave) {
+        cr4 |= 1U << 9;
+        if (features & (1U << 25)) cr4 |= 1U << 10;
+    }
+    asm volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+    u32 cr0;
+    asm volatile("mov %%cr0, %0" : "=r"(cr0));
+    if (!has_fpu) {
+        cr0 |= 4;
+        asm volatile("mov %0, %%cr0" :: "r"(cr0) : "memory");
+        return;
+    }
+    cr0 = (cr0 & ~12U) | 0x22;
+    asm volatile("mov %0, %%cr0" :: "r"(cr0) : "memory");
+    memset(initial_fpu_state, 0, sizeof(initial_fpu_state));
+    *(u16 *)initial_fpu_state = 0x037f;
+    if (has_fxsave) *(u32 *)(initial_fpu_state + 24) = 0x1f80;
+    else *(u16 *)(initial_fpu_state + 8) = 0xffff;
+    restore_fpu(initial_fpu_state);
+}
 
 static void serial_outb(unsigned short port, unsigned char data)
 {
@@ -40,6 +99,7 @@ static void idle_thread()
 
 void Architecture::init(const multiboot_info *boot)
 {
+    init_fpu();
     serial_print("[ARCH] Starting x86 architecture initialization\n");
     io.print("[ARCH] Initializing x86 architecture\n");
 
@@ -429,6 +489,7 @@ void Architecture::save_process_context(Process *proc, const InterruptFrame *fra
 
     process_st *info = proc->getPInfo();
 
+    save_fpu(info);
     info->regs.eax = frame->eax;
     info->regs.ecx = frame->ecx;
     info->regs.edx = frame->edx;
@@ -456,6 +517,7 @@ void Architecture::save_process_context(Process *proc, const InterruptFrame *fra
 InterruptFrame *Architecture::load_process_context(Process *proc)
 {
     process_st *info = proc->getPInfo();
+    load_fpu(info);
     InterruptFrame *frame = (InterruptFrame *)(info->interrupt_stack ? info->interrupt_stack :
         info->regs.esp - __builtin_offsetof(InterruptFrame, useresp));
 
@@ -563,6 +625,7 @@ bool Architecture::replace_image(process_st *info, process_st *image) {
     info->regs.cr3 = info->pd->physical_address;
     info->interrupt_stack = info->syscall_frame;
     info->signal = 0;
+    info->fpu_initialized = false;
     memset(info->sigfn, 0, sizeof(info->sigfn));
     load_process_context(pcurrent);
     vmm.destroy_page_directory(old);
@@ -595,6 +658,11 @@ int Architecture::fork(process_st *info, process_st *father) {
     info->regs.fs = frame->fs;
     info->regs.gs = frame->gs;
     info->regs.cr3 = info->pd->physical_address;
+    save_fpu(father);
+    if (has_fpu) {
+        memcpy(fpu_state(info), fpu_state(father), sizeof(initial_fpu_state));
+        info->fpu_initialized = true;
+    }
     info->b_exec = father->b_exec;
     info->e_exec = father->e_exec;
     info->b_bss = father->b_bss;

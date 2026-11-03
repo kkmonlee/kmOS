@@ -16,11 +16,11 @@ constexpr u8 ATA_REG_LBA2 = 0x05;
 constexpr u8 ATA_REG_HDDEVSEL = 0x06;
 constexpr u8 ATA_REG_COMMAND = 0x07;
 constexpr u8 ATA_REG_STATUS = 0x07;
-constexpr u8 ATA_REG_CONTROL = 0x02;
-constexpr u8 ATA_REG_ALTSTATUS = 0x02;
 
 constexpr u8 ATA_CMD_IDENTIFY = 0xEC;
 constexpr u8 ATA_CMD_READ_SECTORS = 0x20;
+constexpr u8 ATA_CMD_WRITE_SECTORS = 0x30;
+constexpr u8 ATA_CMD_CACHE_FLUSH = 0xE7;
 
 constexpr u8 ATA_SR_ERR = 0x01;
 constexpr u8 ATA_SR_DRQ = 0x08;
@@ -29,12 +29,10 @@ constexpr u8 ATA_SR_DRDY = 0x40;
 constexpr u8 ATA_SR_BSY = 0x80;
 
 constexpr u32 ATA_SECTOR_SIZE = 512;
+constexpr u32 ATA_LBA_LIMIT = 1U << 28;
 
 static void ata_io_wait(u16 ctrl_base) {
-    io.inb(ctrl_base + ATA_REG_ALTSTATUS);
-    io.inb(ctrl_base + ATA_REG_ALTSTATUS);
-    io.inb(ctrl_base + ATA_REG_ALTSTATUS);
-    io.inb(ctrl_base + ATA_REG_ALTSTATUS);
+    for (u32 i = 0; i < 15; ++i) io.inb(ctrl_base);
 }
 
 static void serial_print_ata(const char* str) {
@@ -58,6 +56,7 @@ ATADevice::~ATADevice() = default;
 bool ATADevice::wait_busy() {
     for (u32 i = 0; i < 100000; ++i) {
         u8 status = io.inb(io_base_ + ATA_REG_STATUS);
+        if (!status || status == 0xff) return false;
         if (!(status & ATA_SR_BSY)) {
             return true;
         }
@@ -68,12 +67,10 @@ bool ATADevice::wait_busy() {
 bool ATADevice::wait_data_ready() {
     for (u32 i = 0; i < 100000; ++i) {
         u8 status = io.inb(io_base_ + ATA_REG_STATUS);
-        if (!(status & ATA_SR_BSY) && (status & ATA_SR_DRQ)) {
-            return true;
-        }
-        if (status & ATA_SR_ERR || status & ATA_SR_DF) {
-            return false;
-        }
+        if (!status || status == 0xff) return false;
+        if (status & ATA_SR_BSY) continue;
+        if (status & (ATA_SR_ERR | ATA_SR_DF)) return false;
+        if (status & ATA_SR_DRQ) return true;
     }
     return false;
 }
@@ -85,6 +82,9 @@ void ATADevice::select_drive(u32 lba) {
 }
 
 bool ATADevice::initialize() {
+    identify_.present = false;
+    identify_.total_sectors = 0;
+    io.outb(ctrl_base_, 2);
     select_drive(0);
 
     io.outb(io_base_ + ATA_REG_SECCOUNT0, 0);
@@ -96,12 +96,13 @@ bool ATADevice::initialize() {
     ata_io_wait(ctrl_base_);
 
     u8 status = io.inb(io_base_ + ATA_REG_STATUS);
-    if (status == 0) {
+    if (status == 0 || status == 0xff) {
         serial_print_ata("[ATA] No device present on primary channel\n");
         return false;
     }
 
-    if (!wait_data_ready()) {
+    if (!wait_busy() || io.inb(io_base_ + ATA_REG_LBA1) ||
+        io.inb(io_base_ + ATA_REG_LBA2) || !wait_data_ready()) {
         serial_print_ata("[ATA] Device did not become ready\n");
         return false;
     }
@@ -130,9 +131,11 @@ bool ATADevice::initialize() {
     }
 
     identify_.total_sectors = ((u32)buffer[61] << 16) | buffer[60];
-    identify_.present = true;
+    if (identify_.total_sectors > ATA_LBA_LIMIT) identify_.total_sectors = ATA_LBA_LIMIT;
+    identify_.present = (buffer[49] & (1U << 9)) && identify_.total_sectors;
 
     kfree(buffer);
+    if (!identify_.present) return false;
 
     serial_print_ata("[ATA] Primary master detected: ");
     serial_print_ata(identify_.model);
@@ -141,8 +144,13 @@ bool ATADevice::initialize() {
     return true;
 }
 
+bool ATADevice::valid_range(u32 lba, u32 count) const {
+    return identify_.present && count && lba < identify_.total_sectors &&
+        count <= identify_.total_sectors - lba && count <= 0xffffffffU / ATA_SECTOR_SIZE;
+}
+
 u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
-    if (!identify_.present || !buffer || count == 0)
+    if (!buffer || !valid_range(lba, count))
         return ERROR_PARAM;
 
     u8* out = (u8*)buffer;
@@ -166,13 +174,16 @@ u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
             out[sector * ATA_SECTOR_SIZE + i * 2] = (u8)(data & 0xFF);
             out[sector * ATA_SECTOR_SIZE + i * 2 + 1] = (u8)((data >> 8) & 0xFF);
         }
+        ata_io_wait(ctrl_base_);
+        if (!wait_busy() || (io.inb(io_base_ + ATA_REG_STATUS) & (ATA_SR_ERR | ATA_SR_DF)))
+            return RETURN_FAILURE;
     }
 
     return RETURN_OK;
 }
 
 u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
-    if (!identify_.present || !buffer || count == 0)
+    if (!buffer || !valid_range(lba, count))
         return ERROR_PARAM;
 
     const u8* in = (const u8*)buffer;
@@ -187,7 +198,7 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
         io.outb(io_base_ + ATA_REG_LBA0, (u8)((lba + sector) & 0xFF));
         io.outb(io_base_ + ATA_REG_LBA1, (u8)(((lba + sector) >> 8) & 0xFF));
         io.outb(io_base_ + ATA_REG_LBA2, (u8)(((lba + sector) >> 16) & 0xFF));
-        io.outb(io_base_ + ATA_REG_COMMAND, 0x30);
+        io.outb(io_base_ + ATA_REG_COMMAND, ATA_CMD_WRITE_SECTORS);
 
         if (!wait_data_ready())
             return RETURN_FAILURE;
@@ -198,6 +209,7 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
             io.outw(io_base_ + ATA_REG_DATA, data);
         }
 
+        ata_io_wait(ctrl_base_);
         if (!wait_busy())
             return RETURN_FAILURE;
 
@@ -206,8 +218,10 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
             return RETURN_FAILURE;
     }
 
-    io.outb(io_base_ + ATA_REG_COMMAND, 0xE7);
-    wait_busy();
+    io.outb(io_base_ + ATA_REG_COMMAND, ATA_CMD_CACHE_FLUSH);
+    ata_io_wait(ctrl_base_);
+    if (!wait_busy() || (io.inb(io_base_ + ATA_REG_STATUS) & (ATA_SR_ERR | ATA_SR_DF)))
+        return RETURN_FAILURE;
 
     return RETURN_OK;
 }

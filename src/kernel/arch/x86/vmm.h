@@ -72,7 +72,8 @@ public:
     void unmap_page(struct page_directory *pd, u32 virtual_addr);
     u32 get_physical_addr(struct page_directory *pd, u32 virtual_addr);
     bool user_range(struct page_directory *pd, u32 address, u32 size, bool writable = false);
-    bool prepare_user_write(struct page_directory *pd, u32 address, u32 size);
+    bool user_write_range(struct page_directory *pd, u32 address, u32 size);
+    bool prepare_user_write(struct page_directory *pd, u32 address, u32 size, int *error = nullptr);
     bool copy_from_user(struct page_directory *pd, void *buffer, u32 address, u32 size);
     bool copy_to_user(struct page_directory *pd, u32 address, const void *buffer, u32 size);
     int user_string(struct page_directory *pd, u32 address, char *buffer, u32 capacity);
