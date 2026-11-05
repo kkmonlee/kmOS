@@ -5,13 +5,14 @@ from pathlib import Path
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 import time
 
 
 class VM:
-    def __init__(self, args, name, ram=64, machine="pc", append="", module=None, disk=None, cpu=None):
+    def __init__(self, args, name, ram=64, machine="pc", append="", module=None, disk=None, cpu=None, swap_disk=None):
         self.temp = tempfile.TemporaryDirectory(prefix="kmos-", dir="/tmp")
         if args.iso:
             name = "iso-" + name
@@ -26,6 +27,8 @@ class VM:
                    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
         if disk:
             command += ["-drive", f"file={disk},format=raw,if=ide,index=0"]
+        if swap_disk:
+            command += ["-drive", f"file={swap_disk},format=raw,if=ide,index=1"]
         if cpu:
             command += ["-cpu", cpu]
         if args.iso:
@@ -93,10 +96,13 @@ class VM:
         raise AssertionError(f"{self.log.name}: timeout or early exit\n{self.text()[-3000:]}\n"
                              f"{self.errors.read_text()}")
 
+    def send_serial(self, data):
+        self.process.stdin.write(data)
+        self.process.stdin.flush()
+
     def serial_command(self, command):
         count = len(re.findall(r"^kmOS:[^\r\n]*\$ ", self.text(), re.MULTILINE))
-        self.process.stdin.write((command + "\n").encode())
-        self.process.stdin.flush()
+        self.send_serial((command + "\n").encode())
         return self.wait(lambda text: len(re.findall(r"^kmOS:[^\r\n]*\$ ", text, re.MULTILINE)) > count)
 
     def close(self):
@@ -265,7 +271,7 @@ def build_user_test(args, temp, source, name):
                     "-o", str(obj)], check=True)
     subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
                     str(repo / "src/userland/linker.ld"), "-o", str(program),
-                    str(repo / "src/userland/start.o"), str(obj)], check=True)
+                    str(repo / "src/userland/start.o"), str(repo / "src/userland/alloc.o"), str(obj)], check=True)
     return program
 
 
@@ -308,6 +314,137 @@ def storage(args, ram):
         assert "[STORAGE] ext2 geometry, records, reads and errors verified" in text, text
         assert "[PANIC]" not in text, text
     print(f"PASS ext2 valid images, malformed metadata and I/O errors: {ram} MB", flush=True)
+
+
+def user_shell(args, temp):
+    program = build_user_test(args, temp, "pipe_test.c", "init")
+    with VM(args, "pipe-signal", append="user", module=program) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+        assert "pipe and signal semantics verified" in text and "[USER] Exit status=00000000" in text, text
+        assert "[USER] Reaped init" in text and "[PANIC]" not in text and "Frame leak" not in text, text
+    print("PASS blocking pipes, descriptor rollback, SIGPIPE and process-group signals", flush=True)
+
+    userland = Path(__file__).resolve().parents[1] / "src/userland"
+    modules = ",".join(str(userland / (name + ".elf")) for name in ("init", "hello", "cat", "sh"))
+    with VM(args, "user-shell", append="user usershell", module=modules) as vm:
+        vm.wait(lambda text: "sh$ " in text)
+        for command, output in (
+            ("echo 'hello | world' | cat|cat", "\nhello | world\n"),
+            ("cd /etc", ""),
+            ("cat motd", "\nkmOS userland\n"),
+            ("echo oops |", "sh: syntax error"),
+        ):
+            prompts = vm.text().count("sh$ ")
+            vm.send_serial((command + "\n").encode())
+            text = vm.wait(lambda text: text.count("sh$ ") > prompts)
+            assert output in text, text
+        start = len(vm.text())
+        vm.send_serial(b"cat | cat\n")
+        vm.wait(lambda text: "cat | cat\n" in text[start:])
+        vm.send_serial(b"foreground\n")
+        vm.wait(lambda text: "\nforeground\n" in text[start:])
+        vm.send_serial(b"\x03")
+        vm.wait(lambda text: "^C\nsh$ " in text[start:])
+        vm.send_serial(b"exit\n")
+        text = vm.wait(lambda text: "kmOS:/$ " in text)
+        assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+    print("PASS interactive userspace shell, pipelines and Ctrl-C", flush=True)
+
+
+def user_heap(args, temp):
+    program = build_user_test(args, temp, "user_heap_test.c", "init")
+    with VM(args, "user-heap", 32, append="user", module=program) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+        assert "userspace heap verified" in text and "[USER] Exit status=00000000" in text, text
+        assert "[USER] Reaped init" in text and "[PANIC]" not in text and "Frame leak" not in text, text
+    print("PASS userspace heap growth, shrink, exhaustion and fork", flush=True)
+
+
+def disk_mount(args, temp):
+    disk = temp / "ext2.img"
+    block = 1024
+    image = bytearray(16 * block)
+    struct.pack_into("<11I", image, block, 16, 16, 0, 6, 5, 1, 0, 0, 16, 16, 16)
+    struct.pack_into("<HH", image, block + 56, 0xef53, 1)
+    struct.pack_into("<I", image, block + 76, 1)
+    struct.pack_into("<IHHI", image, block + 84, 11, 128, 0, 0)
+    struct.pack_into("<I", image, block + 96, 2)
+    struct.pack_into("<IIIHHH", image, 2 * block, 3, 4, 5, 6, 5, 1)
+    image[3 * block:4 * block] = b"\xff\x81" + b"\xff" * (block - 2)
+    image[4 * block:5 * block] = b"\xff\x07" + b"\xff" * (block - 2)
+    for inode, mode, size, links, blocks in (
+        (2, 0o40755, block, 2, [7]),
+        (11, 0o100644, 1300, 1, [8, 9]),
+    ):
+        start = 5 * block + (inode - 1) * 128
+        struct.pack_into("<HHIIIIIHHI", image, start, mode, 0, size, 0, 0, 0, 0, 0, links, 2 * len(blocks))
+        struct.pack_into(f"<{len(blocks)}I", image, start + 40, *blocks)
+    for offset, inode, length, kind, name in (
+        (0, 2, 12, 2, b"."), (12, 2, 12, 2, b".."), (24, 11, block - 24, 1, b"note"),
+    ):
+        position = 7 * block + offset
+        struct.pack_into("<IHBB", image, position, inode, length, len(name), kind)
+        image[position + 8:position + 8 + len(name)] = name
+    image[8 * block:8 * block + 1300] = b"Z" * 1300
+    disk.write_bytes(image)
+
+    program = build_user_test(args, temp, "disk_test.c", "init")
+    for mode, argument in (("rw", "disk=hda,rw"), ("ro", "disk=hda")):
+        with VM(args, f"disk-{mode}", append=f"user {argument}", module=program, disk=disk) as vm:
+            text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+            assert f"[DISK] /mnt/disk mounted {mode}" in text and "disk contents verified" in text, text
+            assert "[USER] Exit status=00000000" in text and "[PANIC]" not in text, text
+        image[8 * block:8 * block + 1028] = bytes(33 + i % 90 for i in range(1028))
+        assert disk.read_bytes() == image, f"unexpected disk contents after {mode} boot"
+    print("PASS ext2 ATA mount, cross-block writes and read-only reboot", flush=True)
+
+    malformed = bytearray(image)
+    struct.pack_into("<I", malformed, 5 * block + 10 * 128 + 44, 3)
+    disk.write_bytes(malformed)
+    with VM(args, "disk-metadata", append="user disk=hda,rw", module=program, disk=disk) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+        assert "disk write rejected" in text and "[USER] Exit status=00000000" in text, text
+        assert "[PANIC]" not in text, text
+    assert disk.read_bytes() == malformed
+    print("PASS ext2 rejects writes into metadata before changing data", flush=True)
+
+    disk.write_bytes(image[:9 * block])
+    with VM(args, "disk-truncated", append="disk=hda,rw", disk=disk) as vm:
+        text = vm.wait(lambda text: "[BOOT] Ready" in text)
+        assert "[DISK] Could not mount hda" in text and "[PANIC]" not in text, text
+    print("PASS boot with truncated ext2 disk", flush=True)
+
+
+def swap(args, temp):
+    with VM(args, "swap-slots", append="test=swap") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[SWAP] Slot ownership, protection and I/O errors verified" in text, text
+    print("PASS swap slots, fork, permissions and I/O failures", flush=True)
+
+    disk = temp / "swap.img"
+    header = b"KMOS-SWAP\x00".ljust(4096, b"\x00")
+    with disk.open("wb") as image:
+        image.write(header)
+        image.truncate(16 * 1024 * 1024)
+    program = build_user_test(args, temp, "swap_test.c", "init")
+    with VM(args, "swap-pressure", 16, append="user swap=hdb", module=program, swap_disk=disk) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=60)
+        assert "[SWAP] hdb enabled" in text and "swap under memory pressure verified" in text, text
+        assert "[USER] Exit status=00000000" in text and "Frame leak" not in text, text
+        assert "[PANIC]" not in text and "[USER] fault" not in text, text
+        text = vm.serial_command("swap")
+        assert "Used Swap:        0 MB (0 KB)" in text, text
+    with disk.open("rb") as image:
+        assert image.read(4096) == header and any(image.read(16 * 4096))
+    print("PASS disk swap under user memory pressure", flush=True)
+
+    with disk.open("r+b") as image:
+        image.write(b"INVALID")
+    with VM(args, "swap-invalid", append="swap=hdb", swap_disk=disk) as vm:
+        text = vm.wait(lambda text: "[BOOT] Ready" in text)
+        assert "[SWAP] hdb unavailable or invalid" in text and "[PANIC]" not in text, text
+    print("PASS boot with invalid swap image", flush=True)
 
 
 def storage_and_user_regressions(args, temp):
@@ -595,6 +732,10 @@ def main():
     userland(args)
     with tempfile.TemporaryDirectory(prefix="kmos-regressions-") as temp:
         storage_and_user_regressions(args, Path(temp))
+        swap(args, Path(temp))
+        disk_mount(args, Path(temp))
+        user_heap(args, Path(temp))
+        user_shell(args, Path(temp))
     boot(args, 64, "q35")
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")
     with tempfile.TemporaryDirectory(prefix="kmos-user-") as temp:

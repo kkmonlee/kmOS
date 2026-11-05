@@ -9,7 +9,8 @@ enum
   TYPE_DIRECTORY,
   TYPE_DEVICE,
   TYPE_PROCESS,
-  TYPE_LINK
+  TYPE_LINK,
+  TYPE_PIPE
 };
 
 class File
@@ -27,6 +28,7 @@ public:
   virtual u32 ioctl(u32 id, u8 *buffer);
   virtual u32 remove();
   virtual void scan();
+  virtual bool waitable() const { return false; }
   void retain();
   void release();
 

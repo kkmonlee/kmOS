@@ -11,7 +11,7 @@ struct ATAIdentifyData {
 
 class ATADevice : public BlockDevice {
 public:
-    ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave);
+    ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave, bool publish = true);
     virtual ~ATADevice();
 
     bool initialize();
@@ -32,7 +32,7 @@ private:
     ATAIdentifyData identify_;
 };
 
-void ata_init();
+void ata_init(bool publish = true);
 ATADevice* ata_primary_master();
 
 #endif

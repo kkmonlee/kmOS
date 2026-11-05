@@ -31,14 +31,27 @@ You can also try `make`, `make run RAM=128M`, `make debug`, `make test`, `make i
 
 ISO builds need GRUB and xorriso, or a running Docker/OrbStack installation.
 
-In the shell, try `help`, `ls`, `cat /etc/motd`, `mem`, `ps` or `uptime`.
+Run `make run USER_SHELL=1` for the userspace shell. Try
+`echo hello | cat`, `cd /etc`, or `cat motd`. Ctrl-C stops the
+foreground pipeline. `exit` returns to the kernel shell.
+
+In the kernel shell, try `help`, `ls`, `cat /etc/motd`, `mem`, `ps` or `uptime`.
 `fetch` and `lsb_release -a` show system information. The version is in [VERSION](VERSION).
+
+## Disk and swap
+
+`make run DISK=disk.img` mounts a raw ext2 image at `/mnt/disk`.
+Add `DISK_RW=1` to overwrite existing, allocated file data. File creation
+and growth still need support.
+
+Run `make swap.img` and pass `SWAP=swap.img` to use a 64 MB swap disk.
 
 ## What works
 
 - Multiboot/GRUB, VGA and serial consoles 
 - Paging, physical frame tracking, heap allocators and copy-on-write 
 - Ring-3 ELF programs, timer scheduling, `fork`, `execve` and `waitpid` 
+- Userspace heap with `sbrk`, `malloc` and `free`
 - Paths, working directories, shared descriptors, `dup2` and close-on-exec 
 - `init`, `hello` and `cat`, loaded from boot modules under `/bin` 
 - Keyboard and serial input 
@@ -49,12 +62,11 @@ and user faults terminate the process. The supported syscall wrappers are in
 
 ## Still to do
 
-- Connect storage drivers to the filesystem and support persistent writes.
-- Move the interactive shell into user space and add pipes and signal handling.
+- Add file creation and growth on ext2.
+- Add signal handlers and background jobs.
 - Add SMP support and more hardware drivers.
 
-Only the first 1 GB of RAM is managed. The interactive shell runs in kernel
-space, and boot-module files are read-only.
+Only the first 1 GB of RAM is managed. Boot-module files are read-only.
 
 ## Screenshots
 

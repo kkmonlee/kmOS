@@ -237,7 +237,7 @@ FilesystemDriver *Filesystem::find_driver(const char *name)
   return nullptr;
 }
 
-bool Filesystem::mount(BlockDevice *device, const char *mount_path, const char *fs_name)
+bool Filesystem::mount(BlockDevice *device, const char *mount_path, const char *fs_name, bool writable)
 {
   if (!device || !mount_path || !fs_name)
     return false;
@@ -256,7 +256,7 @@ bool Filesystem::mount(BlockDevice *device, const char *mount_path, const char *
   if (mp->getType() != TYPE_DIRECTORY)
     return false;
 
-  File *final_mp = driver->mount(mp, device);
+  File *final_mp = driver->mount(mp, device, writable);
   if (!final_mp)
     return false;
 

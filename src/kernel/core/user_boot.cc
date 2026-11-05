@@ -29,28 +29,39 @@ static bool module_name(const multiboot_module &module, u32 limit, char *name) {
     return false;
 }
 
-static void start_user_program(const multiboot_module &module) {
+static void start_user_program(const multiboot_module &module, const char *name) {
     u32 frames = vmm.frames_used;
     u32 processes = arch.process_count();
-    Process *process = new Process(const_cast<char *>("init"));
+    Process *process = new Process(const_cast<char *>(name));
+    if (!process) return;
     process->setPParent(arch.pcurrent);
-    const char *args[] = {"init"};
+    const char *args[] = {name};
     if (process->create((const void *)module.start, module.end - module.start, 1, args) != RETURN_OK) {
         serial::write("[USER] Rejected ELF\n");
         delete process;
         return;
     }
-    serial::write("[USER] Started init\n");
+    set_console_owner(process);
+    serial::write("[USER] Started ");
+    serial::write(name);
+    serial::write("\n");
     while (process->getState() != ZOMBIE) asm volatile("hlt" ::: "memory");
     serial::write("[USER] Exit status=");
     serial::hex(process->getExitStatus());
     serial::write("\n");
+    set_console_owner(nullptr);
     arch.destroy_process(process);
     while (arch.process_count() > processes) {
         arch.destroy_all_zombie();
         if (arch.process_count() > processes) asm volatile("hlt" ::: "memory");
     }
-    serial::write(vmm.frames_used == frames ? "[USER] Reaped init\n" : "[USER] Frame leak\n");
+    if (vmm.frames_used == frames) {
+        serial::write("[USER] Reaped ");
+        serial::write(name);
+        serial::write("\n");
+    } else {
+        serial::write("[USER] Frame leak\n");
+    }
 }
 
 void run_user_modules(const multiboot_info *boot) {
@@ -72,6 +83,7 @@ void run_user_modules(const multiboot_info *boot) {
     if (etc && !etc->find("motd")) etc->addChild(new MemoryFile("motd", motd, sizeof(motd) - 1));
     const multiboot_module *modules = (const multiboot_module *)boot->mods_addr;
     bool valid[32] = {};
+    const char *name = boot_has_argument((const char *)boot->cmdline, "usershell") ? "sh" : "init";
     int init = -1;
     for (u32 i = 0; i < boot->mods_count; ++i) {
         const multiboot_module &module = modules[i];
@@ -80,13 +92,13 @@ void run_user_modules(const multiboot_info *boot) {
             continue;
         }
         valid[i] = true;
-        char name[File::kMaxNameLength + 1];
-        if (bin && module_name(module, limit, name) && !bin->find(name)) {
-            MemoryFile *file = new MemoryFile(name, (const void *)module.start, module.end - module.start);
+        char module_path[File::kMaxNameLength + 1];
+        if (bin && module_name(module, limit, module_path) && !bin->find(module_path)) {
+            MemoryFile *file = new MemoryFile(module_path, (const void *)module.start, module.end - module.start);
             if (bin->addChild(file) != RETURN_OK) delete file;
-            else if (!strcmp(name, "init")) init = i;
+            else if (!strcmp(module_path, name)) init = i;
         }
     }
-    if (init >= 0) start_user_program(modules[init]);
-    else for (u32 i = 0; i < boot->mods_count; ++i) if (valid[i]) start_user_program(modules[i]);
+    if (init >= 0) start_user_program(modules[init], name);
+    else for (u32 i = 0; i < boot->mods_count; ++i) if (valid[i]) start_user_program(modules[i], "init");
 }

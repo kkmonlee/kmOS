@@ -13,6 +13,11 @@ private:
     const u8 *data;
 };
 
+class Process;
+
 void init_console();
+void set_console_owner(Process *process);
+void poll_console();
+int set_console_foreground(File *file, u32 operation, u32 group);
 
 #endif

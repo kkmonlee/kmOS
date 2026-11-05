@@ -11,6 +11,7 @@ bool verify_elf();
 bool verify_process_files();
 bool verify_storage();
 bool verify_ata();
+bool verify_swap();
 
 static void finish(bool passed) {
     serial::write(passed ? "[TEST] passed\n" : "[TEST] failed\n");
@@ -25,6 +26,7 @@ void run_filesystem_test(const multiboot_info *boot) {
     if (boot_has_argument((const char *)boot->cmdline, "test=process")) finish(verify_process_files());
     if (boot_has_argument((const char *)boot->cmdline, "test=storage")) finish(verify_storage());
     if (boot_has_argument((const char *)boot->cmdline, "test=ata")) finish(verify_ata());
+    if (boot_has_argument((const char *)boot->cmdline, "test=swap")) finish(verify_swap());
 }
 
 static u32 module_hash(const multiboot_info *boot) {

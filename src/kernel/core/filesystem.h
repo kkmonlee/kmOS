@@ -26,7 +26,7 @@ public:
   u32 addFile(const char *dir, File *fp);
 
   bool register_driver(FilesystemDriver *driver);
-  bool mount(BlockDevice *device, const char *path, const char *fs_name);
+  bool mount(BlockDevice *device, const char *path, const char *fs_name, bool writable = false);
   FilesystemDriver *find_driver(const char *name);
 
   File *pivot_root(File *targetdir);

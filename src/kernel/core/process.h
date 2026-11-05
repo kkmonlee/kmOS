@@ -41,6 +41,11 @@ public:
 
   u32 create(const void *file, u32 size, int argc, const char *const *argv);
   void sendSignal(int sig);
+  bool isUser() const;
+  u32 getGroup() const { return group; }
+  int setGroup(u32 pid, u32 group);
+  void waitForFile(File *file, u32 syscall);
+  static void wakeFile(File *file);
   int wait(int child, u32 status, u32 options);
   bool completeWait(Process *child);
   bool waitingFor(Process *child);
@@ -82,6 +87,8 @@ protected:
   static u32 proc_pid;
 
   u32 pid;
+  u32 group;
+  File *waiting_file;
   u8 state;
   int exit_status;
   int exit_signal;
@@ -104,5 +111,7 @@ protected:
 
   static char *default_tty;
 };
+
+int signal_processes(s32 pid, int signal);
 
 #endif

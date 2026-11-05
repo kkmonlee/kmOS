@@ -39,18 +39,10 @@ struct page_table_entry {
     u32 frame : 20;
 } __attribute__((packed));
 
-struct swapped_page_entry {
-    u32 virtual_addr;
-    u32 swap_entry;
-    struct swapped_page_entry *next;
-};
-
-
 struct page_directory {
     struct page_directory_entry tables[1024];
     struct page_table_entry *page_tables[1024];
     u32 physical_address;
-    struct swapped_page_entry *swapped_pages;
 };
 
 
@@ -66,7 +58,7 @@ struct multiboot_info;
 class VMM {
 public:
     void init(const multiboot_info *boot);
-    struct page_directory *create_page_directory();
+    struct page_directory *create_page_directory(bool reclaim = false);
     void destroy_page_directory(struct page_directory *pd);
     int map_page(struct page_directory *pd, u32 virtual_addr, u32 physical_addr, u32 flags);
     void unmap_page(struct page_directory *pd, u32 virtual_addr);
@@ -74,25 +66,22 @@ public:
     bool user_range(struct page_directory *pd, u32 address, u32 size, bool writable = false);
     bool user_write_range(struct page_directory *pd, u32 address, u32 size);
     bool prepare_user_write(struct page_directory *pd, u32 address, u32 size, int *error = nullptr);
-    bool copy_from_user(struct page_directory *pd, void *buffer, u32 address, u32 size);
-    bool copy_to_user(struct page_directory *pd, u32 address, const void *buffer, u32 size);
+    bool copy_from_user(struct page_directory *pd, void *buffer, u32 address, u32 size, int *error = nullptr);
+    bool copy_to_user(struct page_directory *pd, u32 address, const void *buffer, u32 size, int *error = nullptr);
     int user_string(struct page_directory *pd, u32 address, char *buffer, u32 capacity);
     int handle_page_fault(u32 fault_addr, u32 error_code);
     void switch_page_directory(struct page_directory *pd);
     u32 alloc_frame();
+    u32 alloc_user_frame(page_directory *pd = nullptr, u32 start = 0, u32 end = 0);
     void free_frame(u32 frame_addr);
     bool retain_frame(u32 frame_addr);
     u32 frame_references(u32 frame_addr);
     bool verify_page_tables();
     u32 heap_start;
     u32 heap_size;
-    struct page_table_entry *get_page_table(struct page_directory *pd, u32 virtual_addr, int create);
-    
-    int add_swapped_page(struct page_directory *pd, u32 virtual_addr, u32 swap_entry);
-    u32 get_swap_entry(struct page_directory *pd, u32 virtual_addr);
-    void remove_swapped_page(struct page_directory *pd, u32 virtual_addr);
-    int try_reclaim_memory(u32 pages_needed);
-    
+    page_table_entry *get_page_table(page_directory *pd, u32 address, int create, bool reclaim = false);
+    void invalidate_page(page_directory *pd, u32 address);
+
     u32 frame_count;
     u32 frames_used;
     

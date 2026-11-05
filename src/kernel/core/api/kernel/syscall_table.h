@@ -52,6 +52,8 @@ enum
   SYS_connect = NOT_DEFINED,
   SYS_sigaction = 67,
   SYS_kill = 37,
+  SYS_pipe = 42,
+  SYS_setpgid = 57,
   SYS_sigprocmask = NOT_DEFINED,
   SYS_dbprintf = NOT_DEFINED,
   SYS_create_semaphore = NOT_DEFINED,

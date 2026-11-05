@@ -44,7 +44,7 @@ struct ext2_super_block {
     u32 s_algorithm_usage_bitmap;
     u8  s_prealloc_blocks;
     u8  s_prealloc_dir_blocks;
-    u16 s_padding1;
+    u16 s_reserved_gdt_blocks;
     u8  s_journal_uuid[16];
     u32 s_journal_inum;
     u32 s_journal_dev;
@@ -125,16 +125,17 @@ private:
 class Ext2RegularFile : public Ext2Node {
 public:
     Ext2RegularFile(const char* name, Ext2Mount* mount, u32 inode, u32 size);
-    u32 open(u32 flags) override { return flags ? (u32)-30 : 0; }
+    u32 open(u32 flags) override;
     u32 close() override { return 0; }
-    virtual u32 read(u32 pos, u8* buffer, u32 size) override;
+    u32 read(u32 pos, u8* buffer, u32 size) override;
+    u32 write(u32 pos, u8* buffer, u32 size) override;
 };
 
 class Ext2Filesystem : public FilesystemDriver {
 public:
     Ext2Filesystem();
     virtual const char* name() const override;
-    virtual File* mount(File* mount_point, BlockDevice* device) override;
+    virtual File* mount(File* mount_point, BlockDevice* device, bool writable) override;
 };
 
 extern Ext2Filesystem ext2_driver;

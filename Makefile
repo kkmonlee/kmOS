@@ -2,7 +2,12 @@ CROSS ?= i686-elf
 QEMU ?= qemu-system-i386
 RAM ?= 64M
 KERNEL = src/kernel/kernel.elf
-USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf
+USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf,src/userland/sh.elf
+comma := ,
+QEMU_ARGS = user $(if $(filter 1,$(USER_SHELL)),usershell) $(if $(DISK),disk=hda$(if $(filter 1,$(DISK_RW)),$(comma)rw)) $(if $(SWAP),swap=hdb)
+QEMU_HDA = -drive "file=$(DISK),format=raw,if=ide,index=0"
+QEMU_HDB = -drive "file=$(SWAP),format=raw,if=ide,index=1"
+QEMU_DISKS = $(if $(DISK),$(QEMU_HDA)) $(if $(SWAP),$(QEMU_HDB))
 export CROSS
 
 .PHONY: all build run debug test iso test-iso clean check-tools help version check-release release
@@ -19,10 +24,13 @@ check-tools:
 	done
 
 run: all
-	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append user -m $(RAM) -serial stdio -no-reboot
+	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append "$(strip $(QEMU_ARGS))" $(QEMU_DISKS) -m $(RAM) -serial stdio -no-reboot
 
 debug: all
-	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append user -m $(RAM) -display none -serial mon:stdio -no-reboot
+	$(QEMU) -kernel $(KERNEL) -initrd $(USER_PROGRAM) -append "$(strip $(QEMU_ARGS))" $(QEMU_DISKS) -m $(RAM) -display none -serial mon:stdio -no-reboot
+
+swap.img:
+	python3 -c 'with open("$@", "xb") as image: image.write(b"KMOS-SWAP\x00"); image.truncate(64 * 1024 * 1024)'
 
 test: all
 	python3 integration_tests/version_test.py

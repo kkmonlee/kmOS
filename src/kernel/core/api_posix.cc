@@ -2,6 +2,9 @@
 #include <process.h>
 #include <architecture.h>
 #include <filesystem.h>
+#include <cow.h>
+#include <memory_file.h>
+#include <api/kernel/syscall_table.h>
 
 static bool bad_pointer(bool valid) {
   if (valid) return false;
@@ -17,7 +20,7 @@ void call_open() {
   if (result) { arch.setRet(result); return; }
   File *file = fsm.path(path);
   if (!file) { arch.setRet((u32)-2); return; }
-  if (file->getType() != TYPE_FILE && file->getType() != TYPE_DEVICE) {
+  if (file->getType() != TYPE_FILE && file->getType() == TYPE_FILE) {
     arch.setRet((u32)-21);
     return;
   }
@@ -37,20 +40,27 @@ void call_read() {
   u32 count = size > sizeof(buffer) ? sizeof(buffer) : size;
   page_directory *pd = process->getPInfo()->pd;
   if (bad_pointer(vmm.user_write_range(pd, address, count))) return;
-  if (file->getType() != TYPE_DEVICE && count > 0xffffffffU - description->ptr) {
+  if (file->getType() == TYPE_FILE && count > 0xffffffffU - description->ptr) {
     arch.setRet((u32)-75);
     return;
   }
-  int result = file->read(description->ptr, buffer, count);
-  if (result > (int)count) result = -5;
-  if (result > 0) {
+  if (file->waitable()) {
     int error;
-    if (!vmm.prepare_user_write(pd, address, result, &error)) {
+    if (!vmm.prepare_user_write(pd, address, count, &error)) {
       if (!bad_pointer(error != -14)) arch.setRet(error);
       return;
     }
-    if (bad_pointer(vmm.copy_to_user(pd, address, buffer, result))) return;
-    if (file->getType() != TYPE_DEVICE) description->ptr += result;
+  }
+  int result = file->read(description->ptr, buffer, count);
+  if (result == -11 && file->waitable()) { process->waitForFile(file, SYS_read); return; }
+  if (result > (int)count) result = -5;
+  if (result > 0) {
+    int error;
+    if (!vmm.copy_to_user(pd, address, buffer, result, &error)) {
+      if (!bad_pointer(error != -14)) arch.setRet(error);
+      return;
+    }
+    if (file->getType() == TYPE_FILE) description->ptr += result;
   }
   arch.setRet(result);
 }
@@ -66,14 +76,20 @@ void call_write() {
   if (bad_pointer(vmm.user_range(pd, address, size))) return;
   u8 buffer[PAGESIZE];
   u32 count = size > sizeof(buffer) ? sizeof(buffer) : size;
-  if (bad_pointer(vmm.copy_from_user(pd, buffer, address, count))) return;
-  if (file->getType() != TYPE_DEVICE && count > 0xffffffffU - description->ptr) {
+  int error;
+  if (!vmm.copy_from_user(pd, buffer, address, count, &error)) {
+    if (!bad_pointer(error != -14)) arch.setRet(error);
+    return;
+  }
+  if (file->getType() == TYPE_FILE && count > 0xffffffffU - description->ptr) {
     arch.setRet((u32)-75);
     return;
   }
   int result = file->write(description->ptr, buffer, count);
+  if (result == -11 && file->waitable()) { process->waitForFile(file, SYS_write); return; }
+  if (result == -32 && file->getType() == TYPE_PIPE) process->sendSignal(SIGPIPE);
   if (result > (int)count) result = -5;
-  if (result > 0 && file->getType() != TYPE_DEVICE) description->ptr += result;
+  if (result > 0 && file->getType() == TYPE_FILE) description->ptr += result;
   arch.setRet(result);
 }
 
@@ -85,6 +101,37 @@ void call_getpid() { arch.setRet(arch.pcurrent->getPid()); }
 void call_getppid() {
   Process *parent = arch.pcurrent->getPParent();
   arch.setRet(parent ? parent->getPid() : 0);
+}
+
+void call_kill() { arch.setRet(signal_processes(arch.getArg(0), arch.getArg(1))); }
+
+void call_setpgid() { arch.setRet(arch.pcurrent->setGroup(arch.getArg(0), arch.getArg(1))); }
+
+void call_ioctl() {
+  File *file = arch.pcurrent->getFile(arch.getArg(0));
+  if (!file) { arch.setRet((u32)-9); return; }
+  arch.setRet(set_console_foreground(file, arch.getArg(1), arch.getArg(2)));
+}
+
+void call_sbrk() {
+  process_st *info = arch.pcurrent->getPInfo();
+  u32 previous = (u32)info->e_heap;
+  s64 requested = (s64)previous + (s32)arch.getArg(0);
+  if (!previous || requested < (u32)info->b_heap || requested > USER_IMAGE_LIMIT) {
+    arch.setRet((u32)-22);
+    return;
+  }
+
+  u32 next = (u32)requested;
+  u32 first = (previous + PAGESIZE - 1) & ~(PAGESIZE - 1);
+  u32 end = (next + PAGESIZE - 1) & ~(PAGESIZE - 1);
+  if (end > first && cow_manager.map_pages(info->pd, first, end, PG_PRESENT | PG_WRITE | PG_USER)) {
+    arch.setRet((u32)-12);
+    return;
+  }
+  if (end < first) cow_manager.unmap_pages(info->pd, end, first);
+  info->e_heap = (char *)next;
+  arch.setRet(previous);
 }
 
 void call_chdir() {
@@ -112,14 +159,16 @@ static int copy_vector(u32 address, const char **values, int &count, ExecArgumen
   page_directory *pd = arch.pcurrent->getPInfo()->pd;
   for (u32 i = 0; i <= 32; ++i) {
     u32 pointer;
-    if (address + i * 4 < address || !vmm.copy_from_user(pd, &pointer, address + i * 4, 4)) return -14;
+    int error;
+    if (address + i * 4 < address) return -14;
+    if (!vmm.copy_from_user(pd, &pointer, address + i * 4, 4, &error)) return error;
     if (!pointer) return 0;
     if (i == 32 || args->used == sizeof(args->strings)) return -7;
     u32 capacity = sizeof(args->strings) - args->used;
     if (capacity > 256) capacity = 256;
     char *string = args->strings + args->used;
     int result = vmm.user_string(pd, pointer, string, capacity);
-    if (result) return result == -14 ? -14 : -7;
+    if (result) return result == -36 ? -7 : result;
     values[count++] = string;
     do { ++args->used; } while (*string++);
   }

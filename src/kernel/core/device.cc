@@ -8,9 +8,9 @@ Device::~Device()
 {
 }
 
-Device::Device(const char *n) : File((char*)n, TYPE_DEVICE)
+Device::Device(const char *n, bool publish) : File(n, TYPE_DEVICE)
 {
-  fsm.addFile("/dev", this);
+  if (publish) fsm.addFile("/dev", this);
 }
 
 u32 Device::open(u32 flag)

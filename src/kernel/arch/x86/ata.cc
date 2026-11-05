@@ -44,8 +44,8 @@ static void serial_print_ata(const char* str) {
 
 }
 
-ATADevice::ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave)
-    : BlockDevice(name, ATA_SECTOR_SIZE), io_base_(io_base), ctrl_base_(ctrl_base), slave_(slave) {
+ATADevice::ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave, bool publish)
+    : BlockDevice(name, ATA_SECTOR_SIZE, publish), io_base_(io_base), ctrl_base_(ctrl_base), slave_(slave) {
     identify_.model[0] = '\0';
     identify_.total_sectors = 0;
     identify_.present = false;
@@ -82,6 +82,7 @@ void ATADevice::select_drive(u32 lba) {
 }
 
 bool ATADevice::initialize() {
+    IRQGuard guard;
     identify_.present = false;
     identify_.total_sectors = 0;
     io.outb(ctrl_base_, 2);
@@ -137,7 +138,7 @@ bool ATADevice::initialize() {
     kfree(buffer);
     if (!identify_.present) return false;
 
-    serial_print_ata("[ATA] Primary master detected: ");
+    serial_print_ata(slave_ ? "[ATA] Primary slave detected: " : "[ATA] Primary master detected: ");
     serial_print_ata(identify_.model);
     serial_print_ata("\n");
 
@@ -150,6 +151,7 @@ bool ATADevice::valid_range(u32 lba, u32 count) const {
 }
 
 u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
+    IRQGuard guard;
     if (!buffer || !valid_range(lba, count))
         return ERROR_PARAM;
 
@@ -183,6 +185,7 @@ u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
 }
 
 u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
+    IRQGuard guard;
     if (!buffer || !valid_range(lba, count))
         return ERROR_PARAM;
 
@@ -232,12 +235,12 @@ ATADevice* ata_primary_master() {
     return g_primary_master;
 }
 
-void ata_init() {
+void ata_init(bool publish) {
     if (g_primary_master) {
         return;
     }
 
-    ATADevice* dev = new ATADevice("hda", 0x1F0, 0x3F6, 0);
+    ATADevice* dev = new ATADevice("hda", 0x1F0, 0x3F6, 0, publish);
     if (dev && dev->initialize()) {
         g_primary_master = dev;
     } else {

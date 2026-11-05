@@ -10,7 +10,7 @@ class FilesystemDriver {
 public:
     virtual ~FilesystemDriver() = default;
     virtual const char* name() const = 0;
-    virtual File* mount(File* mount_point, BlockDevice* device) = 0;
+    virtual File* mount(File* mount_point, BlockDevice* device, bool writable) = 0;
 };
 
 #endif

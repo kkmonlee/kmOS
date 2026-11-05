@@ -13,5 +13,10 @@ void call_fork();
 void call_chdir();
 void call_getpid();
 void call_getppid();
+void call_sbrk();
+void call_pipe();
+void call_kill();
+void call_setpgid();
+void call_ioctl();
 
 #endif

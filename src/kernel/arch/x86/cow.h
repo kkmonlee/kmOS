@@ -30,7 +30,7 @@ struct vm_area {
 class COWManager {
 public:
     void init();
-    int handle_cow_fault(struct page_directory *pd, u32 virtual_addr, u32 error_code);
+    int handle_cow_fault(struct page_directory *pd, u32 virtual_addr, u32 error_code, u32 start = 0, u32 end = 0);
     int cow_copy_page_range(struct page_directory *dst_pd, struct page_directory *src_pd, 
                            u32 start_addr, u32 end_addr);
     void cow_free_page_range(struct page_directory *pd, u32 start_addr, u32 end_addr);

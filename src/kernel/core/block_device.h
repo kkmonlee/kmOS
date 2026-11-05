@@ -5,7 +5,7 @@
 
 class BlockDevice : public Device {
 public:
-    explicit BlockDevice(const char* name, u32 block_size = 512);
+    explicit BlockDevice(const char* name, u32 block_size = 512, bool publish = true);
     virtual ~BlockDevice();
 
     virtual u32 read_blocks(u32 lba, u32 count, void* buffer) = 0;

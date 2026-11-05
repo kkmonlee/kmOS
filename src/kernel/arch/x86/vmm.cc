@@ -27,7 +27,8 @@ static void zero_memory(void *address, u32 size) {
     for (u32 i = 0; i < size; ++i) bytes[i] = 0;
 }
 
-static void invalidate_page(u32 address) {
+void VMM::invalidate_page(page_directory *pd, u32 address) {
+    if (pd != current_directory) return;
     asm volatile("invlpg (%0)" :: "r"(address) : "memory");
 }
 
@@ -94,9 +95,14 @@ void VMM::init(const multiboot_info *boot) {
     io.print("[VMM] Page tables ready with %d frames available\n", frame_count - frames_used);
 }
 
-struct page_directory *VMM::create_page_directory() {
+struct page_directory *VMM::create_page_directory(bool reclaim) {
     const u32 pages = (sizeof(page_directory) + FRAME_SIZE - 1) / FRAME_SIZE;
+    IRQGuard guard;
     u32 address = alloc_frames(pages);
+    for (u32 attempt = 0; !address && reclaim && attempt < 4 * pages; ++attempt) {
+        if (!swap_manager.reclaim_page()) break;
+        address = alloc_frames(pages);
+    }
     if (!address) return nullptr;
     zero_memory((void *)address, pages * FRAME_SIZE);
     page_directory *pd = (page_directory *)address;
@@ -127,6 +133,13 @@ u32 VMM::alloc_frames(u32 count) {
 
 u32 VMM::alloc_frame() {
     return alloc_frames(1);
+}
+
+u32 VMM::alloc_user_frame(page_directory *pd, u32 start, u32 end) {
+    IRQGuard guard;
+    u32 frame = alloc_frame();
+    if (!frame && swap_manager.reclaim_page(pd, start, end)) frame = alloc_frame();
+    return frame;
 }
 
 void VMM::free_frame(u32 address) {
@@ -208,12 +221,12 @@ bool VMM::init_physical_memory(const multiboot_info *boot) {
     return heap_start && physical_memory.free_pages() >= 64;
 }
 
-page_table_entry *VMM::get_page_table(page_directory *pd, u32 address, int create) {
+page_table_entry *VMM::get_page_table(page_directory *pd, u32 address, int create, bool reclaim) {
     if (!pd) return nullptr;
     u32 index = VADDR_PD_OFFSET(address);
     if (!pd->tables[index].present) {
         if (!create) return nullptr;
-        u32 physical = alloc_frame();
+        u32 physical = reclaim ? alloc_user_frame() : alloc_frame();
         if (!physical) return nullptr;
         zero_memory((void *)physical, FRAME_SIZE);
         pd->page_tables[index] = (page_table_entry *)physical;
@@ -228,9 +241,10 @@ int VMM::map_page(page_directory *pd, u32 address, u32 physical, u32 flags) {
     if ((address | physical) & (FRAME_SIZE - 1)) return -1;
     if ((flags & PG_USER) && (address < USER_OFFSET || address >= USER_STACK)) return -1;
     if ((flags & PG_COW) && (!(flags & PG_USER) || !(flags & PG_PRESENT) || (flags & PG_WRITE))) return -1;
-    page_table_entry *table = get_page_table(pd, address, 1);
+    page_table_entry *table = get_page_table(pd, address, 1, flags & PG_USER);
     if (!table) return -1;
     u32 index = VADDR_PT_OFFSET(address);
+    if (table[index].swapped) return -1;
     zero_memory(&table[index], sizeof(table[index]));
     table[index].frame = physical >> 12;
     table[index].present = (flags & PG_PRESENT) != 0;
@@ -238,19 +252,22 @@ int VMM::map_page(page_directory *pd, u32 address, u32 physical, u32 flags) {
     table[index].user = (flags & PG_USER) != 0;
     table[index].cow = (flags & PG_COW) != 0;
     if (flags & PG_USER) pd->tables[VADDR_PD_OFFSET(address)].user = 1;
-    if (pd == current_directory) invalidate_page(address);
+    invalidate_page(pd, address);
     return 0;
 }
 
 void VMM::unmap_page(page_directory *pd, u32 address) {
     page_table_entry *table = get_page_table(pd, address, 0);
     if (!table) return;
-    u32 index = VADDR_PT_OFFSET(address);
-    if (table[index].present) {
-        u32 frame = table[index].frame << 12;
-        zero_memory(&table[index], sizeof(table[index]));
-        if (pd == current_directory) invalidate_page(address);
+    page_table_entry &entry = table[VADDR_PT_OFFSET(address)];
+    if (entry.present) {
+        u32 frame = entry.frame << 12;
+        entry = {};
+        invalidate_page(pd, address);
         free_frame(frame);
+    } else if (entry.swapped) {
+        swap_manager.release_slot(entry.frame);
+        entry = {};
     }
 }
 
@@ -289,7 +306,7 @@ bool VMM::user_range(page_directory *pd, u32 address, u32 size, bool writable) {
         if (!directory.present || !directory.user || directory.page_size || !table ||
             (writable && !directory.writable)) return false;
         const page_table_entry &entry = table[VADDR_PT_OFFSET(page)];
-        if (!entry.present || !entry.user || (writable && !entry.writable)) return false;
+        if ((!entry.present && !entry.swapped) || !entry.user || (writable && !entry.writable)) return false;
         if (page == last) return true;
     }
 }
@@ -307,35 +324,51 @@ bool VMM::user_write_range(page_directory *pd, u32 address, u32 size) {
 }
 
 bool VMM::prepare_user_write(page_directory *pd, u32 address, u32 size, int *error) {
+    IRQGuard guard;
     if (error) *error = -14;
     if (!user_write_range(pd, address, size)) return false;
-    if (error) *error = -12;
-    if (!size) { if (error) *error = 0; return true; }
-    u32 last = (address + size - 1) & ~(PAGESIZE - 1);
-    for (u32 page = address & ~(PAGESIZE - 1);; page += PAGESIZE) {
+    if (error) *error = 0;
+    if (!size) return true;
+    u32 first = address & ~(PAGESIZE - 1);
+    u32 end = ((address + size - 1) & ~(PAGESIZE - 1)) + PAGESIZE;
+    for (u32 page = first; page < end; page += PAGESIZE) {
         page_table_entry &entry = pd->page_tables[VADDR_PD_OFFSET(page)][VADDR_PT_OFFSET(page)];
-        if (!entry.writable && cow_manager.handle_cow_fault(pd, page, 3)) return false;
-        if (page == last) { if (error) *error = 0; return true; }
+        int result = 0;
+        if (entry.swapped) result = swap_manager.swap_in_page(pd, page, first, end);
+        if (!result && !entry.writable && cow_manager.handle_cow_fault(pd, page, 3, first, end))
+            result = -12;
+        if (result) { if (error) *error = result; return false; }
     }
+    return true;
 }
 
-bool VMM::copy_from_user(page_directory *pd, void *buffer, u32 address, u32 size) {
+bool VMM::copy_from_user(page_directory *pd, void *buffer, u32 address, u32 size, int *error) {
+    IRQGuard guard;
+    if (error) *error = -14;
     if (!user_range(pd, address, size)) return false;
     u8 *bytes = (u8 *)buffer;
     while (size) {
         u32 chunk = PAGESIZE - (address & (PAGESIZE - 1));
         if (chunk > size) chunk = size;
-        const u8 *source = (const u8 *)get_physical_addr(pd, address);
+        u32 physical = get_physical_addr(pd, address);
+        if (!physical) {
+            int result = swap_manager.swap_in_page(pd, address & ~(PAGESIZE - 1));
+            if (result) { if (error) *error = result; return false; }
+            physical = get_physical_addr(pd, address);
+        }
+        const u8 *source = (const u8 *)physical;
         for (u32 i = 0; i < chunk; ++i) bytes[i] = source[i];
         bytes += chunk;
         address += chunk;
         size -= chunk;
     }
+    if (error) *error = 0;
     return true;
 }
 
-bool VMM::copy_to_user(page_directory *pd, u32 address, const void *buffer, u32 size) {
-    if (!prepare_user_write(pd, address, size)) return false;
+bool VMM::copy_to_user(page_directory *pd, u32 address, const void *buffer, u32 size, int *error) {
+    IRQGuard guard;
+    if (!prepare_user_write(pd, address, size, error)) return false;
     const u8 *bytes = (const u8 *)buffer;
     while (size) {
         u32 chunk = PAGESIZE - (address & (PAGESIZE - 1));
@@ -351,7 +384,9 @@ bool VMM::copy_to_user(page_directory *pd, u32 address, const void *buffer, u32 
 
 int VMM::user_string(page_directory *pd, u32 address, char *buffer, u32 capacity) {
     for (u32 i = 0; i < capacity; ++i) {
-        if (address + i < address || !copy_from_user(pd, buffer + i, address + i, 1)) return -14;
+        int error;
+        if (address + i < address) return -14;
+        if (!copy_from_user(pd, buffer + i, address + i, 1, &error)) return error;
         if (!buffer[i]) return 0;
     }
     return -36;
@@ -365,13 +400,11 @@ int VMM::handle_page_fault(u32 fault_addr, u32 error_code) {
             return cow_handle_page_fault(fault_addr, error_code);
         return -1;
     }
-    if (error_code & (4 | 16)) return -1;
-    u32 swap_entry = get_swap_entry(current_directory, page_addr);
-    if (swap_entry && swap_manager.swap_in_page(page_addr, swap_entry) == 0) {
-        remove_swapped_page(current_directory, page_addr);
-        swap_manager.update_page_access(page_addr);
-        return 0;
+    if (error_code & 4) {
+        if (page_addr < USER_OFFSET || page_addr >= USER_STACK) return -1;
+        return swap_manager.swap_in_page(current_directory, page_addr);
     }
+    if (error_code & 16) return -1;
     if (fault_addr >= KERN_HEAP && fault_addr < KERN_HEAP_LIM) {
         u32 frame = alloc_frame();
         if (!frame) return -1;
@@ -396,72 +429,15 @@ void VMM::destroy_page_directory(page_directory *pd) {
         if (!pd->tables[i].present || !pd->page_tables[i]) continue;
         if (kernel_directory && pd->page_tables[i] == kernel_directory->page_tables[i]) continue;
         for (u32 j = 0; j < 1024; ++j) {
-            if (pd->page_tables[i][j].present && pd->page_tables[i][j].user) {
-                free_frame(pd->page_tables[i][j].frame << 12);
-            }
+            const page_table_entry &entry = pd->page_tables[i][j];
+            if (entry.present && entry.user) free_frame(entry.frame << 12);
+            else if (entry.swapped) swap_manager.release_slot(entry.frame);
         }
         free_frame(pd->tables[i].frame << 12);
-    }
-    swapped_page_entry *swapped = pd->swapped_pages;
-    while (swapped) {
-        swapped_page_entry *next = swapped->next;
-        swap_manager.free_swap_entry(swapped->swap_entry);
-        kfree(swapped);
-        swapped = next;
     }
     const u32 pages = (sizeof(page_directory) + FRAME_SIZE - 1) / FRAME_SIZE;
     u32 address = pd->physical_address;
     for (u32 i = 0; i < pages; ++i) free_frame(address + i * FRAME_SIZE);
-}
-
-int VMM::add_swapped_page(struct page_directory *pd, u32 virtual_addr, u32 swap_entry) {
-    struct swapped_page_entry *entry = (struct swapped_page_entry *)kmalloc(sizeof(struct swapped_page_entry));
-    if (!entry) return -1;
-    
-    entry->virtual_addr = virtual_addr;
-    entry->swap_entry = swap_entry;
-    entry->next = pd->swapped_pages;
-    pd->swapped_pages = entry;
-    
-    return 0;
-}
-
-u32 VMM::get_swap_entry(struct page_directory *pd, u32 virtual_addr) {
-    struct swapped_page_entry *entry = pd->swapped_pages;
-    
-    while (entry) {
-        if (entry->virtual_addr == virtual_addr) {
-            return entry->swap_entry;
-        }
-        entry = entry->next;
-    }
-    
-    return 0;
-}
-
-void VMM::remove_swapped_page(struct page_directory *pd, u32 virtual_addr) {
-    struct swapped_page_entry **entry = &pd->swapped_pages;
-    
-    while (*entry) {
-        if ((*entry)->virtual_addr == virtual_addr) {
-            struct swapped_page_entry *to_remove = *entry;
-            *entry = (*entry)->next;
-            kfree(to_remove);
-            return;
-        }
-        entry = &(*entry)->next;
-    }
-}
-
-int VMM::try_reclaim_memory(u32 pages_needed) {
-    return swap_manager.reclaim_pages(pages_needed);
-}
-
-
-
-char *get_page_frame() {
-    u32 frame = vmm.alloc_frame();
-    return (char*)frame;
 }
 
 extern "C" {

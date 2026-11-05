@@ -25,7 +25,7 @@ bool is_elf(const void *file, u32 size) {
 
 static bool map_zeroed(page_directory *pd, u32 begin, u32 end, u32 flags) {
     for (u32 address = begin; address < end; address += PAGESIZE) {
-        u32 frame = vmm.alloc_frame();
+        u32 frame = vmm.alloc_user_frame();
         if (!frame) return false;
         memset((void *)frame, 0, PAGESIZE);
         if (vmm.map_page(pd, address, frame, PG_PRESENT | PG_USER | flags)) {
@@ -85,7 +85,7 @@ u32 load_elf(const void *file, u32 size, process_st *proc, int argc, const char 
     if (!executable_entry) return 0;
 
     if (error) *error = -12;
-    page_directory *pd = vmm.create_page_directory();
+    page_directory *pd = vmm.create_page_directory(true);
     if (!pd) return 0;
     process_st loaded = {};
     loaded.pd = pd;

@@ -133,6 +133,14 @@ static inline void irq_restore(u32 flags) {
     asm volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
 }
 
+class IRQGuard {
+public:
+    IRQGuard() : flags(irq_save()) {}
+    ~IRQGuard() { irq_restore(flags); }
+private:
+    u32 flags;
+};
+
 typedef void (*int_desc)(void);
 
 extern "C"

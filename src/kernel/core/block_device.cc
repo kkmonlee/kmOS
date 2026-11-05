@@ -6,8 +6,8 @@ extern "C" {
     void *memcpy(void *dest, const void *src, int n);
 }
 
-BlockDevice::BlockDevice(const char* name, u32 block_size)
-    : Device(name), block_size_(block_size ? block_size : 512) {
+BlockDevice::BlockDevice(const char* name, u32 block_size, bool publish)
+    : Device(name, publish), block_size_(block_size ? block_size : 512) {
 }
 
 BlockDevice::~BlockDevice() = default;

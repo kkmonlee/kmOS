@@ -12,15 +12,23 @@ extern "C" {
 static constexpr u16 EXT2_SUPER_MAGIC = 0xEF53;
 static constexpr u32 EXT2_ROOT_INO = 2;
 static constexpr u32 EXT2_FILETYPE = 2;
+static constexpr u32 EXT2_SPARSE_SUPER = 1;
+static constexpr u32 EXT2_LARGE_FILE = 2;
+static constexpr u32 EXT2_EXT_ATTR = 8;
+static constexpr u32 EXT2_RESIZE_INODE = 16;
+static constexpr u32 EXT2_DIR_INDEX = 32;
+static constexpr u32 EXT2_IMMUTABLE = 0x10;
+static constexpr u32 EXT2_APPEND = 0x20;
 static constexpr u16 EXT2_MODE_TYPE = 0xf000;
 static constexpr u16 EXT2_MODE_FILE = 0x8000;
 static constexpr u16 EXT2_MODE_DIR = 0x4000;
 
 class Ext2Mount {
 public:
-    explicit Ext2Mount(BlockDevice *device)
+    Ext2Mount(BlockDevice *device, bool writable)
         : device_(device), groups_(nullptr), group_count_(0),
-          block_size_(1024), inode_size_(128), ptrs_per_block_(256), references_(0) {}
+          block_size_(1024), inode_size_(128), ptrs_per_block_(256), references_(0),
+          writable_(writable) {}
 
     ~Ext2Mount() { kfree(groups_); }
     void retain() { ++references_; }
@@ -32,6 +40,12 @@ public:
         if (super_.s_magic != EXT2_SUPER_MAGIC || super_.s_rev_level > 1 ||
             super_.s_log_block_size > 2 || (super_.s_feature_incompat & ~EXT2_FILETYPE))
             return false;
+
+        if (writable_ && (super_.s_state != 1 || super_.s_last_orphan ||
+            (super_.s_rev_level && (super_.s_first_ino < 11 ||
+                                   super_.s_first_ino > super_.s_inodes_count)) ||
+            (super_.s_feature_compat & ~(EXT2_EXT_ATTR | EXT2_RESIZE_INODE | EXT2_DIR_INDEX)) ||
+            (super_.s_feature_ro_compat & ~(EXT2_SPARSE_SUPER | EXT2_LARGE_FILE)))) return false;
 
         block_size_ = 1024u << super_.s_log_block_size;
         inode_size_ = super_.s_rev_level ? super_.s_inode_size : 128;
@@ -45,35 +59,44 @@ public:
             inode_size_ > block_size_ || (inode_size_ & (inode_size_ - 1)))
             return false;
 
+        u8 end;
+        if (device_->read(super_.s_blocks_count * block_size_ - 1, &end, 1) != RETURN_OK)
+            return false;
         group_count_ = 1 + (super_.s_blocks_count - super_.s_first_data_block - 1) /
             super_.s_blocks_per_group;
         if ((super_.s_inodes_count - 1) / super_.s_inodes_per_group >= group_count_ ||
             group_count_ > 0xffffffffU / sizeof(ext2_group_desc)) return false;
         u32 table_size = group_count_ * sizeof(ext2_group_desc);
         u32 first_gdt_block = block_size_ == 1024 ? 2 : 1;
-        u32 table_blocks = 1 + (table_size - 1) / block_size_;
+        table_blocks_ = 1 + (table_size - 1) / block_size_;
         if (first_gdt_block >= super_.s_blocks_count ||
-            table_blocks > super_.s_blocks_count - first_gdt_block) return false;
+            table_blocks_ > super_.s_blocks_count - first_gdt_block) return false;
         groups_ = (ext2_group_desc *)kmalloc(table_size);
         if (!groups_ || device_->read(first_gdt_block * block_size_, (u8 *)groups_, table_size) != RETURN_OK)
             return false;
 
-        u32 inode_blocks = (super_.s_inodes_per_group * inode_size_ + block_size_ - 1) / block_size_;
+        inode_blocks_ = (super_.s_inodes_per_group * inode_size_ + block_size_ - 1) / block_size_;
         for (u32 i = 0; i < group_count_; ++i) {
             u32 start = super_.s_first_data_block + i * super_.s_blocks_per_group;
             u32 count = super_.s_blocks_count - start;
             if (count > super_.s_blocks_per_group) count = super_.s_blocks_per_group;
             const ext2_group_desc &group = groups_[i];
+            if (writable_ && has_superblock(i)) {
+                u32 reserved = reserved_blocks();
+                if (reserved > count || group.bg_block_bitmap < start + reserved ||
+                    group.bg_inode_bitmap < start + reserved ||
+                    group.bg_inode_table < start + reserved) return false;
+            }
             if (group.bg_inode_table < start || group.bg_inode_table >= start + count ||
-                inode_blocks > start + count - group.bg_inode_table ||
+                inode_blocks_ > start + count - group.bg_inode_table ||
                 group.bg_block_bitmap < start || group.bg_block_bitmap >= start + count ||
                 group.bg_inode_bitmap < start || group.bg_inode_bitmap >= start + count ||
                 !group.bg_block_bitmap || !group.bg_inode_bitmap || !group.bg_inode_table ||
                 group.bg_block_bitmap == group.bg_inode_bitmap ||
                 (group.bg_block_bitmap >= group.bg_inode_table &&
-                 group.bg_block_bitmap - group.bg_inode_table < inode_blocks) ||
+                 group.bg_block_bitmap - group.bg_inode_table < inode_blocks_) ||
                 (group.bg_inode_bitmap >= group.bg_inode_table &&
-                 group.bg_inode_bitmap - group.bg_inode_table < inode_blocks)) return false;
+                 group.bg_inode_bitmap - group.bg_inode_table < inode_blocks_)) return false;
         }
         return true;
     }
@@ -133,6 +156,56 @@ public:
         }
         kfree(block_buffer);
         return total ? total : (u32)-5;
+    }
+
+    int check_write(u32 number, const ext2_inode &inode) {
+        if (!writable_) return -30;
+        if (number < (super_.s_rev_level ? super_.s_first_ino : 11) ||
+            (inode.i_mode & EXT2_MODE_TYPE) != EXT2_MODE_FILE ||
+            !(inode.i_mode & 0222) || (inode.i_flags & (EXT2_IMMUTABLE | EXT2_APPEND))) return -13;
+        return 0;
+    }
+
+    u32 write_file_data(u32 number, const ext2_inode &inode, u32 offset, u8 *buffer, u32 size) {
+        IRQGuard guard;
+        int error = check_write(number, inode);
+        if (error) return error;
+        if (!size) return 0;
+        if (!buffer) return (u32)-22;
+        if (offset >= inode.i_size || size > inode.i_size - offset) return (u32)-27;
+        u32 first = offset / block_size_;
+        u32 last = (offset + size - 1) / block_size_;
+        if (last >= 12 + ptrs_per_block_) return (u32)-95;
+        if (last >= 12 && inode.i_block[12] && !allocated_data_block(inode.i_block[12]))
+            return (u32)-5;
+        u32 *blocks = (u32 *)kmalloc((last - first + 1) * sizeof(u32));
+        if (!blocks) return (u32)-12;
+        for (u32 i = first; i <= last; ++i) {
+            u32 &block = blocks[i - first];
+            if (!get_block(inode, i, block) || (block && (!allocated_data_block(block) ||
+                block == inode.i_file_acl || block == inode.i_block[12] ||
+                block == inode.i_block[13] || block == inode.i_block[14]))) {
+                kfree(blocks);
+                return (u32)-5;
+            }
+            if (!block) {
+                kfree(blocks);
+                return (u32)-95;
+            }
+        }
+
+        u32 written = 0;
+        for (u32 i = first; i <= last; ++i) {
+            u32 within = offset % block_size_;
+            u32 count = block_size_ - within;
+            if (count > size - written) count = size - written;
+            u32 position = blocks[i - first] * block_size_ + within;
+            if (device_->write(position, buffer + written, count) != RETURN_OK) break;
+            written += count;
+            offset += count;
+        }
+        kfree(blocks);
+        return written ? written : (u32)-5;
     }
 
     bool load_directory(Ext2Directory *dir) {
@@ -201,6 +274,38 @@ public:
     }
 
 private:
+    bool has_superblock(u32 group) {
+        if (!(super_.s_feature_ro_compat & EXT2_SPARSE_SUPER) || group < 2) return true;
+        for (u32 base : sparse_super_bases) {
+            u32 value = group;
+            while (value % base == 0) value /= base;
+            if (value == 1) return true;
+        }
+        return false;
+    }
+
+    u32 reserved_blocks() const {
+        return 1 + table_blocks_ + ((super_.s_feature_compat & EXT2_RESIZE_INODE)
+            ? super_.s_reserved_gdt_blocks : 0);
+    }
+
+    bool allocated_data_block(u32 block) {
+        if (!block || block < super_.s_first_data_block || block >= super_.s_blocks_count)
+            return false;
+        u32 relative = block - super_.s_first_data_block;
+        u32 group = relative / super_.s_blocks_per_group;
+        u32 bit = relative % super_.s_blocks_per_group;
+        const ext2_group_desc &desc = groups_[group];
+        if ((has_superblock(group) && bit < reserved_blocks()) || block == desc.bg_block_bitmap ||
+            block == desc.bg_inode_bitmap ||
+            (block >= desc.bg_inode_table && block - desc.bg_inode_table < inode_blocks_))
+            return false;
+        u8 byte;
+        return device_->read(desc.bg_block_bitmap * block_size_ + bit / 8, &byte, 1) == RETURN_OK &&
+            (byte & (1U << (bit % 8)));
+    }
+
+    static constexpr u32 sparse_super_bases[] = {3, 5, 7};
     BlockDevice *device_;
     ext2_super_block super_;
     ext2_group_desc *groups_;
@@ -209,6 +314,9 @@ private:
     u32 inode_size_;
     u32 ptrs_per_block_;
     u32 references_;
+    u32 table_blocks_;
+    u32 inode_blocks_;
+    bool writable_;
 };
 
 Ext2Filesystem ext2_driver;
@@ -235,18 +343,31 @@ void Ext2Directory::scan() { load(); }
 Ext2RegularFile::Ext2RegularFile(const char *name, Ext2Mount *mount, u32 inode, u32 size)
     : Ext2Node(name, TYPE_FILE, mount, inode) { setSize(size); }
 
+u32 Ext2RegularFile::open(u32 flags) {
+    if (!flags) return 0;
+    ext2_inode inode;
+    if (!mount_ || !mount_->read_inode(inode_, &inode)) return (u32)-5;
+    return mount_->check_write(inode_, inode);
+}
+
 u32 Ext2RegularFile::read(u32 pos, u8 *buffer, u32 size) {
     ext2_inode inode;
     if (!mount_ || !mount_->read_inode(inode_, &inode)) return (u32)-5;
     return mount_->read_file_data(inode, pos, buffer, size);
 }
 
+u32 Ext2RegularFile::write(u32 pos, u8 *buffer, u32 size) {
+    ext2_inode inode;
+    if (!mount_ || !mount_->read_inode(inode_, &inode)) return (u32)-5;
+    return mount_->write_file_data(inode_, inode, pos, buffer, size);
+}
+
 Ext2Filesystem::Ext2Filesystem() = default;
 const char *Ext2Filesystem::name() const { return "ext2"; }
 
-File *Ext2Filesystem::mount(File *mount_point, BlockDevice *device) {
+File *Ext2Filesystem::mount(File *mount_point, BlockDevice *device, bool writable) {
     if (!mount_point || !device) return nullptr;
-    Ext2Mount *mount = new Ext2Mount(device);
+    Ext2Mount *mount = new Ext2Mount(device, writable);
     if (!mount || !mount->initialize()) { delete mount; return nullptr; }
     Ext2Directory *root = new Ext2Directory(mount_point->getName(), mount, EXT2_ROOT_INO);
     if (!root) { delete mount; return nullptr; }

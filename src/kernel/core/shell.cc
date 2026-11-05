@@ -423,7 +423,7 @@ int Shell::cmd_swap(int argc, char** argv) {
     u32 used_swap = 0;
     u32 device_count = 0;
     
-    struct swap_device* dev = swap_manager.get_swap_devices();
+    const swap_device *dev = swap_manager.get_swap_devices();
     while (dev != nullptr) {
         device_count++;
         total_swap += dev->pages * 4;
@@ -452,9 +452,8 @@ int Shell::cmd_swap(int argc, char** argv) {
         while (dev != nullptr) {
             u32 dev_mb = (dev->pages * 4) / 1024;
             u32 dev_used_mb = (dev->inuse_pages * 4) / 1024;
-            const char* type_str = (dev->type == SWAP_TYPE_DEVICE) ? "device" : "file";
-            io.print("  [%d] %s (%s): %d MB / %d MB\n", 
-                     idx++, dev->path, type_str, dev_used_mb, dev_mb);
+            io.print("  [%d] %s: %d MB / %d MB\n",
+                     idx++, dev->file->getName(), dev_used_mb, dev_mb);
             dev = dev->next;
         }
     }

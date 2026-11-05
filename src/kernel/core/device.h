@@ -7,7 +7,7 @@
 class Device : public File
 {
 public:
-  explicit Device(const char *name);
+  explicit Device(const char *name, bool publish = true);
   virtual ~Device();
 
 

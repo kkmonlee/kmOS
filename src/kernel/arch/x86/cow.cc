@@ -1,31 +1,19 @@
 #include <os.h>
 #include <cow.h>
+#include <swap.h>
 #include <runtime/slab.h>
 
 COWManager cow_manager;
 static struct slab_cache *vma_cache = nullptr;
-
-class COWGuard {
-public:
-    COWGuard() : flags(irq_save()) {}
-    ~COWGuard() { irq_restore(flags); }
-private:
-    u32 flags;
-};
 
 static bool valid_range(page_directory *pd, u32 start, u32 end) {
     return pd && pd != kernel_directory && !((start | end) & 4095) &&
            start >= USER_OFFSET && start <= end && end <= USER_STACK;
 }
 
-static void invalidate_mapping(page_directory *pd, u32 address) {
-    if (pd == current_directory)
-        asm volatile("invlpg (%0)" :: "r"(address) : "memory");
-}
-
 static bool prepare_range(page_directory *pd, u32 start, u32 end,
                           page_directory_entry *saved) {
-    if (!valid_range(pd, start, end) || pd->swapped_pages) return false;
+    if (!valid_range(pd, start, end)) return false;
     if (start == end) return true;
     for (u32 i = VADDR_PD_OFFSET(start); i <= VADDR_PD_OFFSET(end - 1); ++i) {
         saved[i] = pd->tables[i];
@@ -68,9 +56,9 @@ void COWManager::init() {
     io.print("[COW] Copy-on-Write manager initialized\n");
 }
 
-int COWManager::handle_cow_fault(page_directory *pd, u32 address, u32 error_code) {
+int COWManager::handle_cow_fault(page_directory *pd, u32 address, u32 error_code, u32 start, u32 end) {
     if ((error_code & ~4U) != 3 || address < USER_OFFSET || address >= USER_STACK) return -1;
-    COWGuard guard;
+    IRQGuard guard;
     if (!pd || !pd->tables[VADDR_PD_OFFSET(address)].user ||
         !pd->tables[VADDR_PD_OFFSET(address)].writable || pd->tables[VADDR_PD_OFFSET(address)].page_size)
         return -1;
@@ -82,21 +70,21 @@ int COWManager::handle_cow_fault(page_directory *pd, u32 address, u32 error_code
     u32 references = vmm.frame_references(old_frame);
     if (!references) return -1;
     if (references > 1) {
-        u32 new_frame = vmm.alloc_frame();
+        u32 new_frame = vmm.alloc_user_frame(pd, start, end);
         if (!new_frame) return -1;
         for (u32 i = 0; i < 4096; ++i) ((u8 *)new_frame)[i] = ((const u8 *)old_frame)[i];
         page->frame = new_frame >> 12;
     }
     page->cow = 0;
     page->writable = 1;
-    invalidate_mapping(pd, address);
+    vmm.invalidate_page(pd, address);
     if (references > 1) vmm.free_frame(old_frame);
     return 0;
 }
 
 int COWManager::cow_copy_page_range(page_directory *dst, page_directory *src, u32 start, u32 end) {
-    if (!src || src == dst || src->swapped_pages) return -1;
-    COWGuard guard;
+    if (!src || src == dst) return -1;
+    IRQGuard guard;
     page_directory_entry saved[1024];
     if (!prepare_range(dst, start, end, saved)) return -1;
     if (start == end) return 0;
@@ -108,7 +96,10 @@ int COWManager::cow_copy_page_range(page_directory *dst, page_directory *src, u3
         for (u32 j = 0; j < 1024; ++j) {
             u32 address = (i << 22) | (j << 12);
             if (address < start || address >= end) continue;
-            if (table[j].swapped) return -1;
+            if (table[j].swapped) {
+                if (!table[j].user || !src->tables[i].user || !src->tables[i].writable) return -1;
+                continue;
+            }
             if (!table[j].present || !table[j].user) continue;
             if (!src->tables[i].user || !src->tables[i].writable ||
                 !vmm.frame_references(table[j].frame << 12) ||
@@ -121,19 +112,21 @@ int COWManager::cow_copy_page_range(page_directory *dst, page_directory *src, u3
         if (!table) continue;
         for (u32 j = 0; j < 1024; ++j) {
             u32 address = (i << 22) | (j << 12);
-            if (address < start || address >= end || !table[j].present || !table[j].user) continue;
-            page_table_entry *child_table = vmm.get_page_table(dst, address, 1);
-            if (!child_table || !vmm.retain_frame(table[j].frame << 12)) {
+            if (address < start || address >= end || !table[j].user ||
+                (!table[j].present && !table[j].swapped)) continue;
+            page_table_entry *child_table = vmm.get_page_table(dst, address, 1, true);
+            if (!child_table || !(table[j].swapped ? swap_manager.retain_slot(table[j].frame)
+                                                  : vmm.retain_frame(table[j].frame << 12))) {
                 rollback_range(dst, start, end, saved);
                 return -1;
             }
             child_table[j] = table[j];
-            if (table[j].writable) {
+            if (table[j].present && table[j].writable) {
                 child_table[j].writable = 0;
                 child_table[j].cow = 1;
             }
             dst->tables[i].user = 1;
-            invalidate_mapping(dst, address);
+            vmm.invalidate_page(dst, address);
         }
     }
 
@@ -146,7 +139,7 @@ int COWManager::cow_copy_page_range(page_directory *dst, page_directory *src, u3
             if (table[j].writable) {
                 table[j].writable = 0;
                 table[j].cow = 1;
-                invalidate_mapping(src, address);
+                vmm.invalidate_page(src, address);
             }
         }
     }
@@ -155,13 +148,13 @@ int COWManager::cow_copy_page_range(page_directory *dst, page_directory *src, u3
 
 void COWManager::cow_free_page_range(page_directory *pd, u32 start, u32 end) {
     if (!valid_range(pd, start, end) || start == end) return;
-    COWGuard guard;
+    IRQGuard guard;
     for (u32 i = VADDR_PD_OFFSET(start); i <= VADDR_PD_OFFSET(end - 1); ++i) {
         page_table_entry *table = vmm.get_page_table(pd, i << 22, 0);
         if (!table) continue;
         for (u32 j = 0; j < 1024; ++j) {
             u32 address = (i << 22) | (j << 12);
-            if (address >= start && address < end && table[j].present && table[j].user)
+            if (address >= start && address < end && table[j].user && (table[j].present || table[j].swapped))
                 vmm.unmap_page(pd, address);
         }
     }
@@ -185,11 +178,11 @@ void COWManager::destroy_vma(struct vm_area *vma) {
 }
 
 int COWManager::map_pages(page_directory *pd, u32 start, u32 end, u32 flags) {
-    COWGuard guard;
+    IRQGuard guard;
     page_directory_entry saved[1024];
     if (!(flags & PG_USER) || !(flags & PG_PRESENT) || !prepare_range(pd, start, end, saved)) return -1;
     for (u32 address = start; address < end; address += 4096) {
-        u32 frame = vmm.alloc_frame();
+        u32 frame = vmm.alloc_user_frame();
         if (frame) {
             for (u32 i = 0; i < 4096; ++i) ((u8 *)frame)[i] = 0;
             if (vmm.map_page(pd, address, frame, flags) == 0) continue;
@@ -212,7 +205,7 @@ void COWManager::cleanup_process_cow(page_directory *pd) {
 }
 
 void COWManager::optimize_cow_pages() {
-    COWGuard guard;
+    IRQGuard guard;
     if (!current_directory) return;
     for (u32 i = VADDR_PD_OFFSET(USER_OFFSET); i < VADDR_PD_OFFSET(USER_STACK); ++i) {
         page_table_entry *table = vmm.get_page_table(current_directory, i << 22, 0);
@@ -226,7 +219,7 @@ void COWManager::optimize_cow_pages() {
 }
 
 int COWManager::validate_cow_integrity() {
-    COWGuard guard;
+    IRQGuard guard;
     if (!current_directory) return 0;
     u32 errors = 0;
     for (u32 i = VADDR_PD_OFFSET(USER_OFFSET); i < VADDR_PD_OFFSET(USER_STACK); ++i) {
@@ -241,7 +234,7 @@ int COWManager::validate_cow_integrity() {
 }
 
 void COWManager::print_stats() {
-    COWGuard guard;
+    IRQGuard guard;
     u32 mappings = 0, shared = 0;
     if (current_directory) {
         for (u32 i = VADDR_PD_OFFSET(USER_OFFSET); i < VADDR_PD_OFFSET(USER_STACK); ++i) {

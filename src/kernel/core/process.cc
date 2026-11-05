@@ -59,6 +59,8 @@ Process::Process(char *n) : File(n, TYPE_PROCESS)
   memset(&info, 0, sizeof(info));
   pid = proc_pid++;
   info.pid = pid;
+  group = pid;
+  waiting_file = nullptr;
   state = SLEEPING;
   exit_status = exit_signal = 0;
   waiting = collected = false;
@@ -156,15 +158,17 @@ bool Process::waitingFor(Process *child) {
 bool Process::completeWait(Process *child) {
   if (!waitingFor(child)) return false;
   u32 status = child->getWaitStatus();
-  if (wait_status && !vmm.copy_to_user(info.pd, wait_status, &status, sizeof(status))) {
+  int error = 0;
+  if (wait_status && !vmm.copy_to_user(info.pd, wait_status, &status, sizeof(status), &error) &&
+      error == -14) {
     exit(142, 14);
     return false;
   }
-  info.regs.eax = child->pid;
-  ((InterruptFrame *)info.interrupt_stack)->eax = child->pid;
+  info.regs.eax = error ? (u32)error : child->pid;
+  ((InterruptFrame *)info.interrupt_stack)->eax = info.regs.eax;
   waiting = false;
   state = READY;
-  child->collected = true;
+  child->collected = !error;
   return true;
 }
 
@@ -178,9 +182,10 @@ int Process::wait(int child, u32 status, u32 options) {
       if (cursor->state == ZOMBIE) {
         u32 result = cursor->pid;
         u32 value = cursor->getWaitStatus();
-        if (status && !vmm.copy_to_user(info.pd, status, &value, sizeof(value))) {
-          exit(142, 14);
-          return -14;
+        int error;
+        if (status && !vmm.copy_to_user(info.pd, status, &value, sizeof(value), &error)) {
+          if (error == -14) exit(142, 14);
+          return error;
         }
         cursor->collected = true;
         arch.destroy_process(cursor);
@@ -191,7 +196,7 @@ int Process::wait(int child, u32 status, u32 options) {
   } while (cursor && cursor != arch.plist);
   if (!has_child) return -10;
   if (options & 1) return 0;
-  if (status && !vmm.prepare_user_write(info.pd, status, sizeof(u32))) {
+  if (status && !vmm.user_write_range(info.pd, status, sizeof(u32))) {
     exit(142, 14);
     return -14;
   }
@@ -211,6 +216,7 @@ int Process::fork()
   Process *child = new (memory) Process(getName());
   
   child->pparent = this;
+  child->group = group;
   child->setState(CHILD);
   child->setCurrentDir(getCurrentDir());
   
@@ -220,7 +226,7 @@ int Process::fork()
     if (openfp[i]) ++openfp[i]->users;
   }
   
-  struct page_directory *child_pd = vmm.create_page_directory();
+  struct page_directory *child_pd = vmm.create_page_directory(true);
   if (!child_pd) {
     delete child;
     return -12;
@@ -267,6 +273,7 @@ void Process::exit(int status, int signal)
   exit_status = status;
   exit_signal = signal;
   waiting = false;
+  waiting_file = nullptr;
   closeFiles();
   if (cdir) cdir->release();
   cdir = nullptr;
@@ -436,9 +443,71 @@ u32 Process::getPid()
   return pid;
 }
 
-void Process::sendSignal(int sig)
-{
-  set_signal(&(info.signal), sig);
+bool Process::isUser() const {
+  return info.pd && info.pd != kernel_directory && (info.regs.cs & 3) == 3;
+}
+
+void Process::sendSignal(int sig) {
+  if (sig && sig != SIGCHLD && isUser()) exit(128 + sig, sig);
+}
+
+int signal_processes(s32 pid, int sig) {
+  if (sig != 0 && sig != SIGINT && sig != SIGKILL && sig != SIGPIPE && sig != SIGTERM)
+    return -22;
+  u32 group = pid < 0 ? 0U - (u32)pid : arch.pcurrent->getGroup();
+  bool found = false;
+  Process *process = arch.plist;
+  if (process) do {
+    if (process->isUser() && process->getState() != ZOMBIE &&
+        (pid > 0 ? process->getPid() == (u32)pid : process->getGroup() == group)) {
+      found = true;
+      process->sendSignal(sig);
+    }
+    process = process->getPNext();
+  } while (process && process != arch.plist);
+  return found ? 0 : -3;
+}
+
+int Process::setGroup(u32 target_pid, u32 target_group) {
+  Process *target = this;
+  if (target_pid && target_pid != pid) {
+    target = arch.plist;
+    while (target && target->pid != target_pid) {
+      target = target->pnext;
+      if (target == arch.plist) return -3;
+    }
+    if (!target || target->pparent != this || !target->isUser()) return -3;
+  }
+  if (!target_group) target_group = target->pid;
+  if (target_group != target->pid) {
+    Process *process = arch.plist;
+    while (process && !(process->isUser() && process->group == target_group)) {
+      process = process->pnext;
+      if (process == arch.plist) return -3;
+    }
+    if (!process) return -3;
+  }
+  target->group = target_group;
+  return 0;
+}
+
+void Process::waitForFile(File *file, u32 syscall) {
+  InterruptFrame *frame = (InterruptFrame *)info.syscall_frame;
+  frame->eip -= 2;
+  frame->eax = syscall;
+  waiting_file = file;
+  state = SLEEPING;
+}
+
+void Process::wakeFile(File *file) {
+  Process *process = arch.plist;
+  if (process) do {
+    if (process->waiting_file == file) {
+      process->waiting_file = nullptr;
+      process->state = READY;
+    }
+    process = process->pnext;
+  } while (process && process != arch.plist);
 }
 
 void Process::reset_pinfo()

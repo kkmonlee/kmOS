@@ -22,6 +22,21 @@ static inline int dup2(int from, int to) { return syscall3(63, from, to, 0); }
 static inline int getpid(void) { return syscall3(20, 0, 0, 0); }
 static inline int getppid(void) { return syscall3(64, 0, 0, 0); }
 static inline int chdir(const char *path) { return syscall3(12, (u32)path, 0, 0); }
+static inline int pipe(int fds[2]) { return syscall3(42, (u32)fds, 0, 0); }
+static inline int kill(int pid, int signal) { return syscall3(37, pid, signal, 0); }
+static inline int setpgid(int pid, int group) { return syscall3(57, pid, group, 0); }
+static inline int set_foreground(int group) { return syscall3(54, 0, 1, group); }
+
+static inline void *sbrk(int increment) {
+    u32 result = syscall3(45, increment, 0, 0);
+    return (void *)(result >= 0xfffff000U ? (u32)-1 : result);
+}
+
+void *malloc(u32 size);
+void *calloc(u32 count, u32 size);
+void *realloc(void *memory, u32 size);
+void free(void *memory);
+
 static inline void exit(int status) {
     syscall3(1, status, 0, 0);
     for (;;) __asm__ volatile("ud2");

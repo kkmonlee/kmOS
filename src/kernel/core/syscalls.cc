@@ -19,6 +19,11 @@ void Syscalls::init()
   add(SYS_chdir, &call_chdir);
   add(SYS_getpid, &call_getpid);
   add(SYS_getppid, &call_getppid);
+  add(SYS_sbrk, &call_sbrk);
+  add(SYS_pipe, &call_pipe);
+  add(SYS_kill, &call_kill);
+  add(SYS_setpgid, &call_setpgid);
+  add(SYS_ioctl, &call_ioctl);
 }
 
 void Syscalls::add(u32 num, syscall_handler h)
