@@ -21,8 +21,7 @@ public:
     const ATAIdentifyData& identify() const { return identify_; }
 
 private:
-    bool wait_busy();
-    bool wait_data_ready();
+    bool wait_status(u8 set, u8 clear, bool check_errors);
     void select_drive(u32 lba);
     bool valid_range(u32 lba, u32 count) const;
 

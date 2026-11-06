@@ -1,6 +1,7 @@
 #include <os.h>
 #include <arch/x86/ata.h>
 #include <arch/x86/io.h>
+#include <arch/x86/pit.h>
 #include <runtime/alloc.h>
 
 extern IO io;
@@ -30,6 +31,39 @@ constexpr u8 ATA_SR_BSY = 0x80;
 
 constexpr u32 ATA_SECTOR_SIZE = 512;
 constexpr u32 ATA_LBA_LIMIT = 1U << 28;
+constexpr u16 SPEAKER_PORT = 0x61;
+constexpr u8 PIT_CHANNEL2_OUTPUT = 0x20;
+constexpr u16 ATA_POLL_TICKS = PIT_BASE_FREQ / 20;
+constexpr u32 ATA_TIMEOUT_PERIODS = 5 * 20;
+
+class ATATimeout {
+public:
+    ATATimeout() : speaker_(io.inb(SPEAKER_PORT)), remaining_(ATA_TIMEOUT_PERIODS) {
+        arm();
+    }
+
+    ~ATATimeout() { io.outb(SPEAKER_PORT, speaker_); }
+
+    bool expired() {
+        if (!(io.inb(SPEAKER_PORT) & PIT_CHANNEL2_OUTPUT)) return false;
+        if (!--remaining_) return true;
+        arm();
+        return false;
+    }
+
+private:
+    void arm() {
+        u8 speaker = speaker_ & ~3;
+        io.outb(SPEAKER_PORT, speaker);
+        io.outb(PIT_COMMAND, 0xb0);
+        io.outb(PIT_CHANNEL2, (u8)ATA_POLL_TICKS);
+        io.outb(PIT_CHANNEL2, (u8)(ATA_POLL_TICKS >> 8));
+        io.outb(SPEAKER_PORT, speaker | 1);
+    }
+
+    u8 speaker_;
+    u32 remaining_;
+};
 
 static void ata_io_wait(u16 ctrl_base) {
     for (u32 i = 0; i < 15; ++i) io.inb(ctrl_base);
@@ -53,25 +87,15 @@ ATADevice::ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave, boo
 
 ATADevice::~ATADevice() = default;
 
-bool ATADevice::wait_busy() {
-    for (u32 i = 0; i < 100000; ++i) {
-        u8 status = io.inb(io_base_ + ATA_REG_STATUS);
-        if (!status || status == 0xff) return false;
-        if (!(status & ATA_SR_BSY)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ATADevice::wait_data_ready() {
-    for (u32 i = 0; i < 100000; ++i) {
-        u8 status = io.inb(io_base_ + ATA_REG_STATUS);
+bool ATADevice::wait_status(u8 set, u8 clear, bool check_errors) {
+    ATATimeout timeout;
+    do {
+        u8 status = io.inb(ctrl_base_);
         if (!status || status == 0xff) return false;
         if (status & ATA_SR_BSY) continue;
-        if (status & (ATA_SR_ERR | ATA_SR_DF)) return false;
-        if (status & ATA_SR_DRQ) return true;
-    }
+        if (check_errors && (status & (ATA_SR_ERR | ATA_SR_DF))) return false;
+        if ((status & set) == set && !(status & clear)) return true;
+    } while (!timeout.expired());
     return false;
 }
 
@@ -102,8 +126,8 @@ bool ATADevice::initialize() {
         return false;
     }
 
-    if (!wait_busy() || io.inb(io_base_ + ATA_REG_LBA1) ||
-        io.inb(io_base_ + ATA_REG_LBA2) || !wait_data_ready()) {
+    if (!wait_status(0, 0, false) || io.inb(io_base_ + ATA_REG_LBA1) ||
+        io.inb(io_base_ + ATA_REG_LBA2) || !wait_status(ATA_SR_DRQ, 0, true)) {
         serial_print_ata("[ATA] Device did not become ready\n");
         return false;
     }
@@ -159,7 +183,7 @@ u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
     for (u32 sector = 0; sector < count; ++sector) {
         select_drive(lba + sector);
 
-        if (!wait_busy())
+        if (!wait_status(0, ATA_SR_DRQ, false))
             return RETURN_FAILURE;
 
         io.outb(io_base_ + ATA_REG_SECCOUNT0, 1);
@@ -167,8 +191,9 @@ u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
         io.outb(io_base_ + ATA_REG_LBA1, (u8)(((lba + sector) >> 8) & 0xFF));
         io.outb(io_base_ + ATA_REG_LBA2, (u8)(((lba + sector) >> 16) & 0xFF));
         io.outb(io_base_ + ATA_REG_COMMAND, ATA_CMD_READ_SECTORS);
+        ata_io_wait(ctrl_base_);
 
-        if (!wait_data_ready())
+        if (!wait_status(ATA_SR_DRQ, 0, true))
             return RETURN_FAILURE;
 
         for (u32 i = 0; i < ATA_SECTOR_SIZE / 2; ++i) {
@@ -177,7 +202,7 @@ u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
             out[sector * ATA_SECTOR_SIZE + i * 2 + 1] = (u8)((data >> 8) & 0xFF);
         }
         ata_io_wait(ctrl_base_);
-        if (!wait_busy() || (io.inb(io_base_ + ATA_REG_STATUS) & (ATA_SR_ERR | ATA_SR_DF)))
+        if (!wait_status(0, ATA_SR_DRQ, true))
             return RETURN_FAILURE;
     }
 
@@ -194,7 +219,7 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
     for (u32 sector = 0; sector < count; ++sector) {
         select_drive(lba + sector);
 
-        if (!wait_busy())
+        if (!wait_status(0, ATA_SR_DRQ, false))
             return RETURN_FAILURE;
 
         io.outb(io_base_ + ATA_REG_SECCOUNT0, 1);
@@ -202,8 +227,9 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
         io.outb(io_base_ + ATA_REG_LBA1, (u8)(((lba + sector) >> 8) & 0xFF));
         io.outb(io_base_ + ATA_REG_LBA2, (u8)(((lba + sector) >> 16) & 0xFF));
         io.outb(io_base_ + ATA_REG_COMMAND, ATA_CMD_WRITE_SECTORS);
+        ata_io_wait(ctrl_base_);
 
-        if (!wait_data_ready())
+        if (!wait_status(ATA_SR_DRQ, 0, true))
             return RETURN_FAILURE;
 
         for (u32 i = 0; i < ATA_SECTOR_SIZE / 2; ++i) {
@@ -213,17 +239,13 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
         }
 
         ata_io_wait(ctrl_base_);
-        if (!wait_busy())
-            return RETURN_FAILURE;
-
-        u8 status = io.inb(io_base_ + ATA_REG_STATUS);
-        if (status & (ATA_SR_ERR | ATA_SR_DF))
+        if (!wait_status(0, ATA_SR_DRQ, true))
             return RETURN_FAILURE;
     }
 
     io.outb(io_base_ + ATA_REG_COMMAND, ATA_CMD_CACHE_FLUSH);
     ata_io_wait(ctrl_base_);
-    if (!wait_busy() || (io.inb(io_base_ + ATA_REG_STATUS) & (ATA_SR_ERR | ATA_SR_DF)))
+    if (!wait_status(0, ATA_SR_DRQ, true))
         return RETURN_FAILURE;
 
     return RETURN_OK;

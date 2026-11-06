@@ -12,7 +12,8 @@ import time
 
 
 class VM:
-    def __init__(self, args, name, ram=64, machine="pc", append="", module=None, disk=None, cpu=None, swap_disk=None):
+    def __init__(self, args, name, ram=64, machine="pc", append="", module=None, disk=None, cpu=None,
+                 swap_disk=None, disk_write_bps=None):
         self.temp = tempfile.TemporaryDirectory(prefix="kmos-", dir="/tmp")
         if args.iso:
             name = "iso-" + name
@@ -26,7 +27,10 @@ class VM:
                    "-qmp", f"unix:{qmp_path},server=on,wait=off", "-no-reboot",
                    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
         if disk:
-            command += ["-drive", f"file={disk},format=raw,if=ide,index=0"]
+            drive = f"file={disk},format=raw,if=ide,index=0"
+            if disk_write_bps:
+                drive += f",bps_wr={disk_write_bps}"
+            command += ["-drive", drive]
         if swap_disk:
             command += ["-drive", f"file={swap_disk},format=raw,if=ide,index=1"]
         if cpu:
@@ -453,14 +457,14 @@ def storage_and_user_regressions(args, temp):
     contents[:512] = bytes([0x5a]) * 512
     contents[-512:] = bytes([0x7b]) * 512
     disk.write_bytes(contents)
-    with VM(args, "ata", append="test=ata", disk=disk) as vm:
+    with VM(args, "ata", append="test=ata", disk=disk, disk_write_bps=2048) as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
         assert vm.process.wait(timeout=2) == 33, text
         assert "[STORAGE] ATA bounds, transfers and flush verified" in text, text
         assert "[PANIC]" not in text, text
     contents[512:1536] = bytes((i * 17 + 3) & 255 for i in range(1024))
     assert disk.read_bytes() == contents, "ATA wrote outside the requested sectors"
-    print("PASS ATA address bounds, valid transfers and persisted contents", flush=True)
+    print("PASS ATA address bounds, slow writes and persisted contents", flush=True)
 
     read_program = build_user_test(args, temp, "read_test.c", "read-test")
     fpu_program = build_user_test(args, temp, "fpu_test.c", "init")
