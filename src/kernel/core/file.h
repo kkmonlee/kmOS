@@ -27,6 +27,8 @@ public:
   virtual u32 write(u32 pos, u8 *buffer, u32 size);
   virtual u32 ioctl(u32 id, u8 *buffer);
   virtual int createFile(const char *name, u32 mode, File *&file);
+  virtual int unlinkFile(const char *name);
+  virtual int truncate(u32 size);
   virtual u32 remove();
   virtual void scan();
   virtual bool waitable() const { return false; }

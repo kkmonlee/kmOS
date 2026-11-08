@@ -260,6 +260,62 @@ bool verify_storage_writes() {
     return true;
 }
 
+static File *removal_mount(TestDisk *disk, File *&file) {
+    disk->reset(1024);
+    File *root = write_mount(disk);
+    if (!root) return nullptr;
+    u8 bytes[2048];
+    memset(bytes, 0x3a, sizeof(bytes));
+    if (root->createFile("removed", 0644, file) || file->write(0, bytes, sizeof(bytes)) != sizeof(bytes)) {
+        root->remove();
+        return nullptr;
+    }
+    return root;
+}
+
+bool verify_storage_removal() {
+    TestDisk *disk = new TestDisk();
+    CHECK(disk);
+    for (u32 operation = 0; operation < 3; ++operation) {
+        File *file = nullptr;
+        File *root = removal_mount(disk, file);
+        CHECK(root && file);
+        if (operation == 2) {
+            file->retain();
+            CHECK(root->unlinkFile("removed") == 0);
+        }
+        u32 before = disk->writes;
+        int result = operation == 0 ? file->truncate(1) :
+            (operation == 1 ? root->unlinkFile("removed") : (int)file->close());
+        CHECK(result == 0);
+        u32 count = disk->writes - before;
+        if (operation == 2) file->release();
+        root->remove();
+        for (u32 failure = 0; failure < count; ++failure) {
+            root = removal_mount(disk, file);
+            CHECK(root && file);
+            if (operation == 2) {
+                file->retain();
+                CHECK(root->unlinkFile("removed") == 0);
+            }
+            disk->fail_write_after = disk->writes + failure;
+            result = operation == 0 ? file->truncate(1) :
+                (operation == 1 ? root->unlinkFile("removed") : (int)file->close());
+            CHECK(result == -5);
+            u32 writes = disk->writes;
+            result = operation == 0 ? file->truncate(1) :
+                (operation == 1 ? root->unlinkFile("removed") : (int)file->close());
+            CHECK(result == -30 && writes == disk->writes);
+            CHECK(disk->super()->s_state == ((failure || operation == 2) ? 0 : 1));
+            if (operation == 2) file->release();
+            root->remove();
+        }
+    }
+    delete disk;
+    serial::write("[STORAGE] Truncate, unlink and close failures verified\n");
+    return true;
+}
+
 bool verify_ata() {
     ata_init();
     ATADevice *disk = ata_primary_master();

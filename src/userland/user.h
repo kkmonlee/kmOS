@@ -26,6 +26,8 @@ static inline int open(const char *path, int flags, ...) {
     }
     return syscall3(5, (u32)path, flags, mode);
 }
+static inline int unlink(const char *path) { return syscall3(17, (u32)path, 0, 0); }
+static inline int ftruncate(int fd, int size) { return syscall3(93, fd, size, 0); }
 static inline int lseek(int fd, int offset, int origin) { return syscall3(19, fd, offset, origin); }
 static inline int close(int fd) { return syscall3(6, fd, 0, 0); }
 static inline int read(int fd, void *buffer, u32 count) { return syscall3(3, fd, (u32)buffer, count); }

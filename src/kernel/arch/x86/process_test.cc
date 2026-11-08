@@ -11,10 +11,11 @@ struct Counts { u32 opens, closes, destroyed; };
 
 class TrackedFile : public File {
 public:
-    TrackedFile(Counts *counts) : File("tracked", TYPE_FILE), counts(counts) { setSize(6); }
+    TrackedFile(Counts *counts, int close_result = 0)
+        : File("tracked", TYPE_FILE), counts(counts), close_result(close_result) { setSize(6); }
     ~TrackedFile() { ++counts->destroyed; }
     u32 open(u32) override { ++counts->opens; return 0; }
-    u32 close() override { ++counts->closes; return 0; }
+    u32 close() override { ++counts->closes; return close_result; }
     u32 read(u32 offset, u8 *buffer, u32 count) override {
         if (offset >= 6) return 0;
         if (count > 6 - offset) count = 6 - offset;
@@ -23,6 +24,7 @@ public:
     }
 private:
     Counts *counts;
+    int close_result;
 };
 
 bool verify_process_files() {
@@ -48,6 +50,16 @@ bool verify_process_files() {
     CHECK(second.opens == 3 && second.closes == 3 && !second.destroyed);
     delete two;
     CHECK(second.destroyed == 1);
+    Counts failed_close = {};
+    process = new Process(const_cast<char *>("close_error_test"));
+    one = new TrackedFile(&failed_close, -5);
+    CHECK(process->addFile(one, 0) == 0 && process->duplicateFile(0, 1) == 1);
+    CHECK(process->deleteFile(0) == 0 && failed_close.closes == 0);
+    CHECK(process->deleteFile(1) == -5 && failed_close.closes == 1);
+    CHECK(process->deleteFile(1) == -9 && !process->getFile(1));
+    delete process;
+    delete one;
+    CHECK(failed_close.closes == 1 && failed_close.destroyed == 1);
     Counts forced = {};
     process = new Process(const_cast<char *>("deleted_file_test"));
     one = new TrackedFile(&forced);

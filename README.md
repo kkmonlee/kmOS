@@ -41,11 +41,11 @@ In the kernel shell, try `help`, `ls`, `cat /etc/motd`, `mem`, `ps` or `uptime`.
 
 ## Disk and swap
 
-`make run DISK=disk.img` mounts a raw ext2 image at `/mnt/disk`.
-Add `DISK_RW=1` to create files and write to them. The driver supports
-direct and singly indirect blocks, including sparse files.
+Pass an ext2 image with `make run DISK=disk.img`.
+It mounts at `/mnt/disk`. Add `DISK_RW=1` to allow writes.
 
-Run `make swap.img` and pass `SWAP=swap.img` to use a 64 MB swap disk.
+`make swap.img` creates a 64 MB swap disk.
+Use it with `make run SWAP=swap.img`.
 
 ## What works
 
@@ -63,9 +63,9 @@ and user faults terminate the process. The supported syscall wrappers are in
 
 ## Still to do
 
-- Add ext2 truncation and file removal.
-- Add signal handlers and background jobs.
-- Add SMP support and more hardware drivers.
+- Indexed ext2 directories.
+- Signal handlers and background jobs.
+- SMP and more hardware drivers.
 
 Only the first 1 GB of RAM is managed. Boot-module files are read-only.
 

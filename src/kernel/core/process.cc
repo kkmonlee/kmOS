@@ -32,13 +32,16 @@ openfile::openfile(File *file, u32 flags) : File(nullptr, TYPE_LINK), mode(flags
   setLink(file);
 }
 
-openfile::~openfile() {
+openfile::~openfile() { close(); }
+
+u32 openfile::close() {
+  IRQGuard guard;
   File *file = getLink();
-  if (file) {
-    file->close();
-    setLink(nullptr);
-    file->release();
-  }
+  if (!file) return 0;
+  u32 result = file->close();
+  setLink(nullptr);
+  file->release();
+  return result;
 }
 
 /* Destructor */
@@ -382,8 +385,9 @@ u32 Process::addFile(File *file, u32 mode)
 
 int Process::openFile(const char *path, u32 flags, u32 mode) {
   IRQGuard guard;
-  if ((flags & ~(O_CREAT | O_EXCL | O_CLOEXEC | 3U)) || (flags & 3) == 3 ||
-      ((flags & O_EXCL) && !(flags & O_CREAT))) return -22;
+  if ((flags & ~(O_CREAT | O_EXCL | O_TRUNC | O_CLOEXEC | 3U)) || (flags & 3) == 3 ||
+      ((flags & O_EXCL) && !(flags & O_CREAT)) ||
+      ((flags & O_TRUNC) && (flags & 3) == O_RDONLY)) return -22;
   u32 fd = 0;
   while (fd < CONFIG_MAX_FILE && openfp[fd]) ++fd;
   if (fd == CONFIG_MAX_FILE) return -24;
@@ -391,7 +395,8 @@ int Process::openFile(const char *path, u32 flags, u32 mode) {
   if (!memory) return -12;
   File *file = nullptr;
   int result = fsm.open(path, flags, mode, file);
-  if (!result) result = file->open(flags & 3);
+  if (result >= 0 && (flags & O_TRUNC) && file->getType() != TYPE_FILE) result = -22;
+  if (!result) result = file->open(flags & (O_TRUNC | 3));
   if (result < 0) { kfree(memory); return result; }
   openfp[fd] = new (memory) openfile(file, flags & 3);
   close_on_exec[fd] = (flags & O_CLOEXEC) != 0;
@@ -411,12 +416,15 @@ openfile *Process::getFileInfo(u32 fd)
 
 int Process::deleteFile(u32 fd)
 {
+  IRQGuard guard;
   if (fd >= CONFIG_MAX_FILE || !openfp[fd]) return -9;
   openfile *description = openfp[fd];
   openfp[fd] = nullptr;
   close_on_exec[fd] = false;
-  if (!--description->users) delete description;
-  return 0;
+  if (--description->users) return 0;
+  int result = description->close();
+  delete description;
+  return result;
 }
 
 int Process::duplicateFile(u32 from, u32 to) {

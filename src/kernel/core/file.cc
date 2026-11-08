@@ -207,6 +207,9 @@ int File::createFile(const char *, u32, File *&file) {
   return -30;
 }
 
+int File::unlinkFile(const char *) { return -30; }
+int File::truncate(u32) { return -30; }
+
 u32 File::remove()
 {
   u32 flags = irq_save();

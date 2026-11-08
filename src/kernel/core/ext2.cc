@@ -2,6 +2,7 @@
 #include <core/ext2.h>
 #include <core/block_device.h>
 #include <runtime/alloc.h>
+#include <fcntl.h>
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
@@ -35,7 +36,7 @@ public:
     Ext2Mount(BlockDevice *device, bool writable)
         : device_(device), groups_(nullptr), group_count_(0),
           block_size_(1024), inode_size_(128), ptrs_per_block_(256), references_(0),
-          writable_(writable) {}
+          writable_(writable), files_(nullptr) {}
 
     ~Ext2Mount() { kfree(groups_); }
     void retain() { ++references_; }
@@ -186,6 +187,31 @@ public:
 
     u32 write_file_data(u32 number, const ext2_inode &inode, u32 offset, u8 *buffer, u32 size);
     int create_file(Ext2Directory *dir, const char *name, u32 mode, File *&file);
+    int truncate_file(u32 number, u32 size);
+    int unlink_file(Ext2Directory *dir, const char *name);
+    int reap_inode(u32 number, Ext2RegularFile *closing = nullptr);
+
+    void attach_file(Ext2RegularFile *file) {
+        IRQGuard guard;
+        file->next_file_ = files_;
+        files_ = file;
+    }
+
+    void detach_file(Ext2RegularFile *file) {
+        IRQGuard guard;
+        Ext2RegularFile **link = &files_;
+        while (*link && *link != file) link = &(*link)->next_file_;
+        if (*link) *link = file->next_file_;
+    }
+
+    bool inode_referenced(u32 number, Ext2RegularFile *closing = nullptr) {
+        for (Ext2RegularFile *file = files_; file; file = file->next_file_) {
+            u32 count = file->references;
+            if (file == closing && count) --count;
+            if (file->inode() == number && count) return true;
+        }
+        return false;
+    }
 
     bool load_directory(Ext2Directory *dir) {
         ext2_inode inode;
@@ -294,6 +320,7 @@ private:
     u32 table_blocks_;
     u32 inode_blocks_;
     bool writable_;
+    Ext2RegularFile *files_;
 };
 
 class Ext2Transaction {
@@ -477,6 +504,177 @@ public:
         return number;
     }
 
+    void free_block(u32 number) {
+        if (!allocated_block(number)) return;
+        u32 relative = number - super_.s_first_data_block;
+        u32 group = relative / super_.s_blocks_per_group;
+        u32 bit = relative % super_.s_blocks_per_group;
+        ext2_group_desc *desc = descriptor(group, true);
+        if (!desc) return;
+        u32 start = super_.s_first_data_block + group * super_.s_blocks_per_group;
+        u32 count = super_.s_blocks_count - start;
+        if (count > super_.s_blocks_per_group) count = super_.s_blocks_per_group;
+        if (desc->bg_free_blocks_count >= count ||
+            super_.s_free_blocks_count >= super_.s_blocks_count - super_.s_first_data_block) {
+            fail(-5);
+            return;
+        }
+        u8 *bitmap = block(desc->bg_block_bitmap, Write);
+        if (!bitmap) return;
+        bitmap[bit / 8] &= ~(1U << (bit % 8));
+        ++desc->bg_free_blocks_count;
+        ++super_.s_free_blocks_count;
+        for (Change *change = changes_; change; change = change->next)
+            if (change->number == number) change->dirty = false;
+    }
+
+    void truncate_inode(ext2_inode &inode, u32 size) {
+        u32 count = 12 + mount_.ptrs_per_block_;
+        if (size > count * mount_.block_size_) { fail(-27); return; }
+        if (inode.i_block[13] || inode.i_block[14] || inode.i_faddr) { fail(-95); return; }
+        u32 *entries = nullptr;
+        u32 allocated = 0;
+        if (inode.i_file_acl) {
+            if (!allocated_block(inode.i_file_acl)) return;
+            ++allocated;
+        }
+        if (inode.i_block[12]) {
+            if (inode.i_block[12] == inode.i_file_acl || !allocated_block(inode.i_block[12])) {
+                fail(-5);
+                return;
+            }
+            entries = (u32 *)block(inode.i_block[12]);
+            if (!entries) return;
+            ++allocated;
+        }
+
+        u32 blocks[12 + 1024];
+        for (u32 i = 0; i < count; ++i) {
+            u32 number = i < 12 ? inode.i_block[i] : (entries ? entries[i - 12] : 0);
+            blocks[i] = number;
+            if (!number) continue;
+            if (number == inode.i_block[12] || number == inode.i_file_acl || !allocated_block(number)) {
+                fail(-5);
+                return;
+            }
+            for (u32 j = 0; j < i; ++j)
+                if (blocks[j] == number) { fail(-5); return; }
+            ++allocated;
+        }
+        u32 sectors = mount_.block_size_ / 512;
+        if (inode.i_blocks != allocated * sectors) { fail(-5); return; }
+
+        u32 keep = (size + mount_.block_size_ - 1) / mount_.block_size_;
+        bool keep_indirect = false;
+        for (u32 i = 0; i < count; ++i) {
+            if (!blocks[i]) continue;
+            if (i < keep) {
+                if (i >= 12) keep_indirect = true;
+                continue;
+            }
+            free_block(blocks[i]);
+            if (error_) return;
+            inode.i_blocks -= sectors;
+            if (i < 12) inode.i_block[i] = 0;
+            else {
+                if (!block(inode.i_block[12], Write)) return;
+                entries[i - 12] = 0;
+            }
+        }
+        if (inode.i_block[12] && !keep_indirect) {
+            free_block(inode.i_block[12]);
+            if (error_) return;
+            inode.i_block[12] = 0;
+            inode.i_blocks -= sectors;
+        }
+
+        u32 begin = size < inode.i_size ? size : inode.i_size;
+        u32 end = size < inode.i_size
+            ? ((size + mount_.block_size_ - 1) / mount_.block_size_) * mount_.block_size_ : size;
+        for (u32 offset = begin; offset < end;) {
+            u32 index = offset / mount_.block_size_;
+            u32 within = offset % mount_.block_size_;
+            u32 bytes = mount_.block_size_ - within;
+            if (bytes > end - offset) bytes = end - offset;
+            if (index < keep && blocks[index]) {
+                u8 *data = block(blocks[index], Write);
+                if (!data) return;
+                memset(data + within, 0, bytes);
+            }
+            offset += bytes;
+        }
+        inode.i_size = size;
+    }
+
+    void orphan_inode(u32 number, ext2_inode &inode) {
+        inode.i_dtime = super_.s_last_orphan;
+        super_.s_last_orphan = number;
+    }
+
+    bool remove_orphan(u32 number, ext2_inode &inode) {
+        u32 previous = 0;
+        u32 current = super_.s_last_orphan;
+        for (u32 seen = 0; current && seen < super_.s_inodes_count; ++seen) {
+            ext2_inode entry;
+            if (!allocated_inode(current) || !mount_.read_inode(current, &entry) || entry.i_links_count) {
+                fail(-5);
+                return false;
+            }
+            if (current == number) {
+                if (previous) {
+                    ext2_inode parent;
+                    if (!mount_.read_inode(previous, &parent)) { fail(-5); return false; }
+                    parent.i_dtime = entry.i_dtime;
+                    store_inode(previous, parent);
+                } else {
+                    super_.s_last_orphan = entry.i_dtime;
+                }
+                inode = entry;
+                return true;
+            }
+            previous = current;
+            current = entry.i_dtime;
+        }
+        if (current) fail(-5);
+        return false;
+    }
+
+    void release_inode(u32 number, ext2_inode &inode) {
+        truncate_inode(inode, 0);
+        if (error_) return;
+        if (inode.i_file_acl) {
+            u32 *header = (u32 *)block(inode.i_file_acl);
+            if (!header) return;
+            if (header[0] != 0xea020000 || !header[1] || header[1] > 1024 || header[2] != 1) {
+                fail(-5);
+                return;
+            }
+            if (header[1] == 1) free_block(inode.i_file_acl);
+            else {
+                if (!block(inode.i_file_acl, Write)) return;
+                --header[1];
+            }
+        }
+        if (!allocated_inode(number)) return;
+        u32 group = (number - 1) / super_.s_inodes_per_group;
+        u32 bit = (number - 1) % super_.s_inodes_per_group;
+        ext2_group_desc *desc = descriptor(group, true);
+        if (!desc) return;
+        u32 count = super_.s_inodes_count - group * super_.s_inodes_per_group;
+        if (count > super_.s_inodes_per_group) count = super_.s_inodes_per_group;
+        if (desc->bg_free_inodes_count >= count || super_.s_free_inodes_count >= super_.s_inodes_count) {
+            fail(-5);
+            return;
+        }
+        u8 *bitmap = block(desc->bg_inode_bitmap, Write);
+        u8 *data = inode_slot(number);
+        if (!bitmap || !data) return;
+        bitmap[bit / 8] &= ~(1U << (bit % 8));
+        ++desc->bg_free_inodes_count;
+        ++super_.s_free_inodes_count;
+        memset(data, 0, mount_.inode_size_);
+    }
+
     int commit() {
         if (error_) return error_;
         u16 dirty = 0;
@@ -493,7 +691,7 @@ public:
         super_.s_state = 0;
         if (mount_.device_->write(1024, (u8 *)&super_, sizeof(super_)) != RETURN_OK)
             return io_failure();
-        u16 clean = 1;
+        u16 clean = super_.s_last_orphan ? 0 : 1;
         if (mount_.device_->write(1024 + __builtin_offsetof(ext2_super_block, s_state),
                                  (u8 *)&clean, sizeof(clean)) != RETURN_OK)
             return io_failure();
@@ -680,6 +878,99 @@ int Ext2Mount::create_file(Ext2Directory *dir, const char *name, u32 mode, File 
     return 0;
 }
 
+int Ext2Mount::truncate_file(u32 number, u32 size) {
+    IRQGuard guard;
+    ext2_inode inode;
+    if (!read_inode(number, &inode)) return -5;
+    int error = check_write(number, inode, false);
+    if (error) return error;
+    Ext2Transaction transaction(*this);
+    if (!transaction.allocated_inode(number)) return transaction.error();
+    transaction.truncate_inode(inode, size);
+    transaction.store_inode(number, inode);
+    return transaction.commit();
+}
+
+int Ext2Mount::reap_inode(u32 number, Ext2RegularFile *closing) {
+    IRQGuard guard;
+    if (!super_.s_last_orphan || inode_referenced(number, closing)) return 0;
+    if (!writable_) return -30;
+    Ext2Transaction transaction(*this);
+    ext2_inode inode;
+    if (!transaction.remove_orphan(number, inode)) return transaction.error();
+    transaction.release_inode(number, inode);
+    return transaction.commit();
+}
+
+int Ext2Mount::unlink_file(Ext2Directory *dir, const char *name) {
+    IRQGuard guard;
+    if (!writable_) return -30;
+    File *file = dir->find(name);
+    if (!file) return -2;
+    if (file->getType() == TYPE_DIRECTORY) return -21;
+    if (file->getType() != TYPE_FILE) return -95;
+    Ext2RegularFile *node = static_cast<Ext2RegularFile *>(file);
+    ext2_inode directory, inode;
+    if (!read_inode(dir->inode(), &directory) || !read_inode(node->inode(), &inode)) return -5;
+    if (!(directory.i_mode & 0222) || !(directory.i_mode & 0111) ||
+        (directory.i_flags & (EXT2_IMMUTABLE | EXT2_APPEND))) return -13;
+    if (directory.i_flags & 0x1000) return -95;
+    int error = check_write(node->inode(), inode, false);
+    if (error) return error;
+    if (!inode.i_links_count) return -5;
+
+    Ext2Transaction transaction(*this);
+    if (!transaction.allocated_inode(dir->inode()) || !transaction.allocated_inode(node->inode()))
+        return transaction.error();
+    u32 length = 0;
+    while (name[length]) ++length;
+    bool found = false;
+    for (u32 i = 0; !found && i < directory.i_size / block_size_; ++i) {
+        u32 number;
+        if (!get_block(directory, i, number) || !transaction.allocated_block(number)) return -5;
+        u8 *data = transaction.block(number);
+        if (!data) return transaction.error();
+        ext2_dir_entry *previous = nullptr;
+        for (u32 offset = 0; offset < block_size_;) {
+            ext2_dir_entry *entry = (ext2_dir_entry *)(data + offset);
+            if (entry->rec_len < sizeof(*entry) || (entry->rec_len & 3) ||
+                entry->rec_len > block_size_ - offset ||
+                entry->name_len > entry->rec_len - sizeof(*entry)) return -5;
+            bool equal = entry->inode == node->inode() && entry->name_len == length;
+            for (u32 j = 0; equal && j < length; ++j) equal = entry->name[j] == name[j];
+            if (equal) {
+                if (!transaction.block(number, Ext2Transaction::Write)) return transaction.error();
+                if (previous) previous->rec_len += entry->rec_len;
+                else {
+                    entry->inode = 0;
+                    entry->name_len = 0;
+                    entry->file_type = 0;
+                }
+                found = true;
+                break;
+            }
+            previous = entry;
+            offset += entry->rec_len;
+        }
+    }
+    if (!found) return -5;
+    --inode.i_links_count;
+    if (!inode.i_links_count) {
+        if (inode_referenced(node->inode())) {
+            transaction.orphan_inode(node->inode(), inode);
+            transaction.store_inode(node->inode(), inode);
+        } else {
+            transaction.release_inode(node->inode(), inode);
+        }
+    } else {
+        transaction.store_inode(node->inode(), inode);
+    }
+    error = transaction.commit();
+    if (error) return error;
+    file->File::remove();
+    return 0;
+}
+
 Ext2Filesystem ext2_driver;
 
 Ext2Node::Ext2Node(const char *name, u8 type, Ext2Mount *mount, u32 inode)
@@ -709,14 +1000,46 @@ int Ext2Directory::createFile(const char *name, u32 mode, File *&file) {
     return mount_->create_file(this, name, mode, file);
 }
 
+int Ext2Directory::unlinkFile(const char *name) {
+    IRQGuard guard;
+    if (removed) return -2;
+    if (!load()) return -5;
+    return mount_->unlink_file(this, name);
+}
+
 Ext2RegularFile::Ext2RegularFile(const char *name, Ext2Mount *mount, u32 inode, u32 size)
-    : Ext2Node(name, TYPE_FILE, mount, inode) { setSize(size); }
+    : Ext2Node(name, TYPE_FILE, mount, inode), next_file_(nullptr) {
+    setSize(size);
+    if (mount_) mount_->attach_file(this);
+}
+
+Ext2RegularFile::~Ext2RegularFile() {
+    IRQGuard guard;
+    if (mount_) {
+        mount_->detach_file(this);
+        mount_->reap_inode(inode_);
+    }
+}
+
+u32 Ext2RegularFile::close() {
+    IRQGuard guard;
+    return mount_ ? mount_->reap_inode(inode_, this) : 0;
+}
+
+int Ext2RegularFile::truncate(u32 size) {
+    IRQGuard guard;
+    int result = mount_ ? mount_->truncate_file(inode_, size) : -5;
+    if (!result) setSize(size);
+    return result;
+}
 
 u32 Ext2RegularFile::open(u32 flags) {
     if (!flags) return 0;
     ext2_inode inode;
     if (!mount_ || !mount_->read_inode(inode_, &inode)) return (u32)-5;
-    return mount_->check_write(inode_, inode);
+    int result = mount_->check_write(inode_, inode);
+    if (!result && (flags & O_TRUNC)) result = truncate(0);
+    return result;
 }
 
 u32 Ext2RegularFile::getSize() {

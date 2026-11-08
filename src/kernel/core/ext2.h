@@ -118,19 +118,26 @@ public:
     bool load();
     void scan() override;
     int createFile(const char *name, u32 mode, File *&file) override;
+    int unlinkFile(const char *name) override;
 
 private:
     bool loaded_;
 };
 
 class Ext2RegularFile : public Ext2Node {
+    friend class Ext2Mount;
 public:
     Ext2RegularFile(const char* name, Ext2Mount* mount, u32 inode, u32 size);
     u32 open(u32 flags) override;
-    u32 close() override { return 0; }
+    ~Ext2RegularFile() override;
+    u32 close() override;
+    int truncate(u32 size) override;
     u32 getSize() override;
     u32 read(u32 pos, u8* buffer, u32 size) override;
     u32 write(u32 pos, u8* buffer, u32 size) override;
+
+private:
+    Ext2RegularFile *next_file_;
 };
 
 class Ext2Filesystem : public FilesystemDriver {

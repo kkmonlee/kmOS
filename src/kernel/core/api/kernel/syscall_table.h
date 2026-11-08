@@ -23,6 +23,7 @@ enum
   SYS_isatty = NOT_DEFINED,
   SYS_lseek = 19,
   SYS_unlink = 17,
+  SYS_ftruncate = 93,
   SYS_link = 18,
   SYS_readlink = 19,
   SYS_sleep_thread = NOT_DEFINED,

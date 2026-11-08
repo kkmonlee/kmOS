@@ -22,6 +22,25 @@ void call_open() {
   arch.setRet(process->openFile(path, arch.getArg(1), arch.getArg(2)));
 }
 
+void call_unlink() {
+  char path[Filesystem::kMaxPathLength];
+  int result = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
+  if (bad_pointer(result != -14)) return;
+  arch.setRet(result ? result : fsm.unlink(path));
+}
+
+void call_ftruncate() {
+  Process *process = arch.pcurrent;
+  File *file = process->getFile(arch.getArg(0));
+  openfile *description = process->getFileInfo(arch.getArg(0));
+  if (!file || description->mode == O_RDONLY) { arch.setRet((u32)-9); return; }
+  if (file->getType() != TYPE_FILE || (s32)arch.getArg(1) < 0) {
+    arch.setRet((u32)-22);
+    return;
+  }
+  arch.setRet(file->truncate(arch.getArg(1)));
+}
+
 void call_lseek() {
   Process *process = arch.pcurrent;
   File *file = process->getFile(arch.getArg(0));

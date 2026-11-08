@@ -81,6 +81,15 @@ int Filesystem::open(const char *name, u32 flags, u32 mode, File *&file) {
   return result ? result : 1;
 }
 
+int Filesystem::unlink(const char *path) {
+  IRQGuard guard;
+  char leaf[File::kMaxNameLength + 1];
+  File *parent = path_parent(path, leaf, sizeof(leaf));
+  if (!parent) return -2;
+  if (parent->getType() != TYPE_DIRECTORY) return -20;
+  return parent->unlinkFile(leaf);
+}
+
 File *Filesystem::resolve(const char *p, char *fname, u32 size)
 {
   if (fname && size) fname[0] = '\0';

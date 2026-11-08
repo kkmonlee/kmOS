@@ -18,6 +18,7 @@ struct openfile : public File
 {
   openfile(File *file, u32 flags);
   ~openfile();
+  u32 close() override;
   u32 mode;
   u32 ptr;
   u32 users;

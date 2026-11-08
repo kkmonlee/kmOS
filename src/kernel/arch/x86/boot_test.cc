@@ -11,6 +11,7 @@ bool verify_elf();
 bool verify_process_files();
 bool verify_storage();
 bool verify_storage_writes();
+bool verify_storage_removal();
 bool verify_ata();
 bool verify_swap();
 
@@ -27,6 +28,7 @@ void run_filesystem_test(const multiboot_info *boot) {
     if (boot_has_argument((const char *)boot->cmdline, "test=process")) finish(verify_process_files());
     if (boot_has_argument((const char *)boot->cmdline, "test=storage")) finish(verify_storage());
     if (boot_has_argument((const char *)boot->cmdline, "test=storage-write")) finish(verify_storage_writes());
+    if (boot_has_argument((const char *)boot->cmdline, "test=storage-remove")) finish(verify_storage_removal());
     if (boot_has_argument((const char *)boot->cmdline, "test=ata")) finish(verify_ata());
     if (boot_has_argument((const char *)boot->cmdline, "test=swap")) finish(verify_swap());
 }

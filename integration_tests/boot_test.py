@@ -486,6 +486,98 @@ def disk_growth(args, temp):
         print(f"PASS ext2 exhaustion, reboot and fsck: {name}", flush=True)
 
 
+def disk_remove(args, temp):
+    with VM(args, "ext2-remove-errors", append="test=storage-remove") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[STORAGE] Truncate, unlink and close failures verified" in text, text
+    print("PASS failures during truncation, unlink and final close", flush=True)
+
+    for tool in ("mke2fs", "e2fsck", "debugfs"):
+        assert shutil.which(tool), f"{tool} is missing; install e2fsprogs"
+    program = build_user_test(args, temp, "disk_remove_test.c", "init")
+    payload = temp / "payload"
+    payload.write_bytes(b"hard")
+    for name, block_size, options in (
+        ("1024", 1024, ["-O", "^resize_inode"]),
+        ("2048", 2048, ["-O", "^resize_inode"]),
+        ("4096", 4096, ["-O", "^resize_inode"]),
+        ("revision-0", 1024, ["-O", "none"]),
+    ):
+        disk = temp / f"ext2-remove-{name}.img"
+        with disk.open("wb") as image:
+            image.truncate(8 * 1024 * 1024)
+        made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", str(block_size),
+                               "-I", "128", *options, str(disk)], capture_output=True, text=True)
+        assert made.returncode == 0, made.stdout + made.stderr
+        if name == "revision-0":
+            with disk.open("r+b") as image:
+                image.seek(1024 + 76)
+                image.write(struct.pack("<I", 0))
+                image.seek(1024 + 84)
+                image.write(bytes(1024 - 84))
+        commands = temp / "debugfs-commands"
+        text = f"write {payload} /hard-a\nlink /hard-a /hard-b\nset_inode_field /hard-a links_count 2\n"
+        if name != "revision-0":
+            text += f"write {payload} /attr-a\nwrite {payload} /attr-b\nea_set /attr-a user.test value\n"
+        commands.write_text(text)
+        seeded = subprocess.run(["debugfs", "-w", "-f", str(commands), str(disk)], capture_output=True, text=True)
+        assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+        if name != "revision-0":
+            first = subprocess.run(["debugfs", "-R", "stat /attr-a", str(disk)], capture_output=True, text=True)
+            second = subprocess.run(["debugfs", "-R", "stat /attr-b", str(disk)], capture_output=True, text=True)
+            acl = int(re.search(r"File ACL: (\d+)", first.stdout)[1])
+            blocks = int(re.search(r"Blockcount: (\d+)", second.stdout)[1])
+            assert acl, first.stdout
+            commands.write_text(f"set_inode_field /attr-b file_acl {acl}\n"
+                                f"set_inode_field /attr-b blocks {blocks + block_size // 512}\n")
+            seeded = subprocess.run(["debugfs", "-w", "-f", str(commands), str(disk)], capture_output=True, text=True)
+            assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+            with disk.open("r+b") as image:
+                image.seek(acl * block_size + 4)
+                image.write(struct.pack("<I", 2))
+        checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+        for mode, marker in (("rw", "truncation, unlink and final close verified"),
+                             ("ro", "truncation and removal verified after reboot")):
+            argument = "disk=hda,rw" if mode == "rw" else "disk=hda"
+            with VM(args, f"ext2-remove-{name}-{mode}", append=f"user {argument}", module=program, disk=disk) as vm:
+                text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=30)
+                assert marker in text and "[USER] Exit status=00000000" in text, text
+                assert "[USER] Reaped init" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+            checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+            assert checked.returncode == 0, checked.stdout + checked.stderr
+        print(f"PASS ext2 truncation, unlink, hard links, shared attributes and final close: {name}", flush=True)
+
+    disk = temp / "ext2-orphan-crash.img"
+    with disk.open("wb") as image:
+        image.truncate(8 * 1024 * 1024)
+    made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-O", "^resize_inode", str(disk)],
+                          capture_output=True, text=True)
+    assert made.returncode == 0, made.stdout + made.stderr
+    with disk.open("rb") as image:
+        image.seek(1024 + 12)
+        free_before = image.read(8)
+    orphan_program = build_user_test(args, temp, "disk_orphan_test.c", "init")
+    with VM(args, "ext2-orphan-crash", append="user disk=hda,rw", module=orphan_program, disk=disk) as vm:
+        text = vm.wait(lambda text: "open orphans ready" in text or "[PANIC]" in text)
+        assert "open orphans ready" in text and "[PANIC]" not in text, text
+    with VM(args, "ext2-orphan-reject", append="disk=hda,rw", disk=disk) as vm:
+        text = vm.wait(lambda text: "[BOOT] Ready" in text)
+        assert "[DISK] Could not mount hda" in text, text
+    recovered = subprocess.run(["e2fsck", "-f", "-y", str(disk)], capture_output=True, text=True)
+    assert recovered.returncode in (0, 1), recovered.stdout + recovered.stderr
+    checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    with disk.open("rb") as image:
+        image.seek(1024 + 12)
+        assert image.read(8) == free_before, "orphan recovery leaked blocks or inodes"
+    with VM(args, "ext2-orphan-recovered", append="disk=hda,rw", disk=disk) as vm:
+        text = vm.wait(lambda text: "[BOOT] Ready" in text)
+        assert "[DISK] /mnt/disk mounted rw" in text, text
+    print("PASS recovery of open unlinked files after interrupted execution", flush=True)
+
+
 def swap(args, temp):
     with VM(args, "swap-slots", append="test=swap") as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
@@ -806,6 +898,7 @@ def main():
         swap(args, Path(temp))
         disk_mount(args, Path(temp))
         disk_growth(args, Path(temp))
+        disk_remove(args, Path(temp))
         user_heap(args, Path(temp))
         user_shell(args, Path(temp))
     boot(args, 64, "q35")
