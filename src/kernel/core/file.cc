@@ -208,6 +208,8 @@ int File::createFile(const char *, u32, File *&file) {
 }
 
 int File::unlinkFile(const char *) { return -30; }
+int File::makeDirectory(const char *, u32) { return -30; }
+int File::removeDirectory(const char *) { return -30; }
 int File::truncate(u32) { return -30; }
 
 u32 File::remove()

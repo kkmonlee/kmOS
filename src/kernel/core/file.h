@@ -28,6 +28,8 @@ public:
   virtual u32 ioctl(u32 id, u8 *buffer);
   virtual int createFile(const char *name, u32 mode, File *&file);
   virtual int unlinkFile(const char *name);
+  virtual int makeDirectory(const char *name, u32 mode);
+  virtual int removeDirectory(const char *name);
   virtual int truncate(u32 size);
   virtual u32 remove();
   virtual void scan();
@@ -52,7 +54,8 @@ public:
   void setName(const char *n);
 
   char *getName();
-  File *getParent();
+  virtual File *getParent();
+  bool isRemoved() const { return removed; }
   File *getChild();
   File *getNext();
   File *getPrec();

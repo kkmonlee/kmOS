@@ -578,6 +578,73 @@ def disk_remove(args, temp):
     print("PASS recovery of open unlinked files after interrupted execution", flush=True)
 
 
+def disk_directories(args, temp):
+    with VM(args, "ext2-directory-errors", append="test=storage-directories") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[STORAGE] Directory allocation, validation and write failures verified" in text, text
+    print("PASS directory allocation limits, malformed entries and write failures", flush=True)
+
+    program = build_user_test(args, temp, "disk_directory_test.c", "init")
+    for name, block_size, options in (
+        ("1024", 1024, ["-g", "256", "-O", "^resize_inode"]),
+        ("2048", 2048, ["-g", "256", "-O", "^resize_inode"]),
+        ("4096", 4096, ["-g", "256", "-O", "^resize_inode"]),
+        ("revision-0", 1024, ["-O", "none"]),
+    ):
+        disk = temp / f"ext2-directories-{name}.img"
+        with disk.open("wb") as image:
+            image.truncate(8 * 1024 * 1024)
+        made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", str(block_size),
+                               "-I", "128", *options, str(disk)], capture_output=True, text=True)
+        assert made.returncode == 0, made.stdout + made.stderr
+        if name == "revision-0":
+            with disk.open("r+b") as image:
+                image.seek(1024 + 76)
+                image.write(struct.pack("<I", 0))
+                image.seek(1024 + 84)
+                image.write(bytes(1024 - 84))
+        commands = temp / "directory-fixture"
+        commands.write_text("mkdir /has-link\nsymlink /has-link/unknown target\n")
+        seeded = subprocess.run(["debugfs", "-w", "-f", str(commands), str(disk)], capture_output=True, text=True)
+        assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+        for mode, marker in (("rw", "mkdir, rmdir and removed working directories verified"),
+                             ("ro", "directories verified after reboot")):
+            argument = "disk=hda,rw" if mode == "rw" else "disk=hda"
+            with VM(args, f"ext2-directories-{name}-{mode}", append=f"user {argument}", module=program, disk=disk) as vm:
+                text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=45)
+                assert marker in text and "[USER] Exit status=00000000" in text, text
+                assert "[USER] Reaped init" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+            checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+            assert checked.returncode == 0, checked.stdout + checked.stderr
+        print(f"PASS ext2 mkdir, rmdir, nonempty checks and removed working directories: {name}", flush=True)
+
+    disk = temp / "ext2-directory-orphans.img"
+    with disk.open("wb") as image:
+        image.truncate(8 * 1024 * 1024)
+    made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-O", "^resize_inode", str(disk)],
+                          capture_output=True, text=True)
+    assert made.returncode == 0, made.stdout + made.stderr
+    with disk.open("rb") as image:
+        image.seek(1024 + 12)
+        free_before = image.read(8)
+    orphan_program = build_user_test(args, temp, "disk_directory_orphan_test.c", "init")
+    with VM(args, "ext2-directory-orphans", append="user disk=hda,rw", module=orphan_program, disk=disk) as vm:
+        text = vm.wait(lambda text: "directory orphans ready" in text or "[PANIC]" in text)
+        assert "directory orphans ready" in text and "[PANIC]" not in text, text
+    with VM(args, "ext2-directory-orphans-reject", append="disk=hda,rw", disk=disk) as vm:
+        text = vm.wait(lambda text: "[BOOT] Ready" in text)
+        assert "[DISK] Could not mount hda" in text, text
+    recovered = subprocess.run(["e2fsck", "-f", "-y", str(disk)], capture_output=True, text=True)
+    assert recovered.returncode in (0, 1), recovered.stdout + recovered.stderr
+    checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    with disk.open("rb") as image:
+        image.seek(1024 + 12)
+        assert image.read(8) == free_before, "directory recovery leaked blocks or inodes"
+    print("PASS recovery of removed working directories after interrupted execution", flush=True)
+
+
 def swap(args, temp):
     with VM(args, "swap-slots", append="test=swap") as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
@@ -899,6 +966,7 @@ def main():
         disk_mount(args, Path(temp))
         disk_growth(args, Path(temp))
         disk_remove(args, Path(temp))
+        disk_directories(args, Path(temp))
         user_heap(args, Path(temp))
         user_shell(args, Path(temp))
     boot(args, 64, "q35")

@@ -33,7 +33,7 @@ enum
   SYS_getppid = 64,
   SYS_getuid = 70,
   SYS_gettid = NOT_DEFINED,
-  SYS_rmdir = NOT_DEFINED,
+  SYS_rmdir = 40,
   SYS_symlink = 9, //	(oldname,newname)
   SYS_fcntl = NOT_DEFINED,
   SYS_get_system_time = NOT_DEFINED,

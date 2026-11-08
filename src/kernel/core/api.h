@@ -6,6 +6,8 @@ void call_close();
 void call_lseek();
 void call_ftruncate();
 void call_unlink();
+void call_mkdir();
+void call_rmdir();
 void call_read();
 void call_write();
 void call_exit();

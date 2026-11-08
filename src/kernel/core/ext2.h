@@ -99,9 +99,11 @@ struct ext2_dir_entry {
 } __attribute__((packed));
 
 class Ext2Node : public File {
+    friend class Ext2Mount;
 public:
     Ext2Node(const char* name, u8 type, Ext2Mount* mount, u32 inode);
     virtual ~Ext2Node();
+    u32 close() override;
 
     Ext2Mount* mount() const { return mount_; }
     u32 inode() const { return inode_; }
@@ -109,6 +111,9 @@ public:
 protected:
     Ext2Mount* mount_;
     u32 inode_;
+
+private:
+    Ext2Node *next_node_;
 };
 
 class Ext2Directory : public Ext2Node {
@@ -119,25 +124,25 @@ public:
     void scan() override;
     int createFile(const char *name, u32 mode, File *&file) override;
     int unlinkFile(const char *name) override;
+    int makeDirectory(const char *name, u32 mode) override;
+    int removeDirectory(const char *name) override;
+    File *getParent() override;
+    void keepParent(Ext2Directory *parent);
 
 private:
     bool loaded_;
+    Ext2Directory *former_parent_;
 };
 
 class Ext2RegularFile : public Ext2Node {
-    friend class Ext2Mount;
 public:
     Ext2RegularFile(const char* name, Ext2Mount* mount, u32 inode, u32 size);
     u32 open(u32 flags) override;
-    ~Ext2RegularFile() override;
-    u32 close() override;
     int truncate(u32 size) override;
     u32 getSize() override;
     u32 read(u32 pos, u8* buffer, u32 size) override;
     u32 write(u32 pos, u8* buffer, u32 size) override;
 
-private:
-    Ext2RegularFile *next_file_;
 };
 
 class Ext2Filesystem : public FilesystemDriver {

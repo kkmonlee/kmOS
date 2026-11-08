@@ -21,7 +21,9 @@ public:
   File *path(const char *p);
   int open(const char *path, u32 flags, u32 mode, File *&file);
   int unlink(const char *path);
-  File *path_parent(const char *p, char *fname, u32 size);
+  int mkdir(const char *path, u32 mode);
+  int rmdir(const char *path);
+  File *path_parent(const char *p, char *fname, u32 size, bool trailing = false);
   bool get_path(File *file, char *buffer, u32 size);
 
   u32 link(const char *fname, const char *newf);
@@ -35,7 +37,7 @@ public:
   File *getRoot();
 
 private:
-  File *resolve(const char *p, char *fname, u32 size);
+  File *resolve(const char *p, char *fname, u32 size, bool trailing = false);
 
   struct MountInfo {
     char path[128];

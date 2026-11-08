@@ -17,6 +17,8 @@ void Syscalls::init()
   add(SYS_lseek, &call_lseek);
   add(SYS_ftruncate, &call_ftruncate);
   add(SYS_unlink, &call_unlink);
+  add(SYS_mkdir, &call_mkdir);
+  add(SYS_rmdir, &call_rmdir);
   add(SYS_read, &call_read);
   add(SYS_dup2, &call_dup2);
   add(SYS_chdir, &call_chdir);

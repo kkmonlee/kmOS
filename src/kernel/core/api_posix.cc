@@ -22,6 +22,20 @@ void call_open() {
   arch.setRet(process->openFile(path, arch.getArg(1), arch.getArg(2)));
 }
 
+void call_mkdir() {
+  char path[Filesystem::kMaxPathLength];
+  int result = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
+  if (bad_pointer(result != -14)) return;
+  arch.setRet(result ? result : fsm.mkdir(path, arch.getArg(1)));
+}
+
+void call_rmdir() {
+  char path[Filesystem::kMaxPathLength];
+  int result = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
+  if (bad_pointer(result != -14)) return;
+  arch.setRet(result ? result : fsm.rmdir(path));
+}
+
 void call_unlink() {
   char path[Filesystem::kMaxPathLength];
   int result = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), path, sizeof(path));

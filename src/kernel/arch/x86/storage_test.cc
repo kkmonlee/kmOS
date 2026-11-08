@@ -316,6 +316,123 @@ bool verify_storage_removal() {
     return true;
 }
 
+bool verify_storage_directories() {
+    TestDisk *disk = new TestDisk();
+    CHECK(disk);
+    for (u32 operation = 0; operation < 3; ++operation) {
+        disk->reset(1024);
+        File *root = write_mount(disk);
+        CHECK(root);
+        File *directory = nullptr;
+        if (operation) {
+            CHECK(root->makeDirectory("directory", 0755) == 0);
+            directory = root->find("directory");
+            CHECK(directory);
+        }
+        if (operation == 2) {
+            directory->retain();
+            CHECK(root->removeDirectory("directory") == 0);
+        }
+        u32 before = disk->writes;
+        int result = operation == 0 ? root->makeDirectory("directory", 0755) :
+            (operation == 1 ? root->removeDirectory("directory") : (int)directory->close());
+        CHECK(result == 0);
+        u32 count = disk->writes - before;
+        if (operation == 2) directory->release();
+        root->remove();
+
+        for (u32 failure = 0; failure < count; ++failure) {
+            disk->reset(1024);
+            root = write_mount(disk);
+            CHECK(root);
+            if (operation) {
+                CHECK(root->makeDirectory("directory", 0755) == 0);
+                directory = root->find("directory");
+                CHECK(directory);
+            }
+            if (operation == 2) {
+                directory->retain();
+                CHECK(root->removeDirectory("directory") == 0);
+            }
+            disk->fail_write_after = disk->writes + failure;
+            result = operation == 0 ? root->makeDirectory("directory", 0755) :
+                (operation == 1 ? root->removeDirectory("directory") : (int)directory->close());
+            CHECK(result == -5);
+            u32 writes = disk->writes;
+            result = operation == 0 ? root->makeDirectory("directory", 0755) :
+                (operation == 1 ? root->removeDirectory("directory") : (int)directory->close());
+            CHECK(result == -30 && disk->writes == writes);
+            CHECK(disk->super()->s_state == ((failure || operation == 2) ? 0 : 1));
+            if (operation == 2) directory->release();
+            root->remove();
+        }
+    }
+
+    disk->reset(1024);
+    File *root = write_mount(disk);
+    File *file = nullptr;
+    CHECK(root && root->createFile("full", 0644, file) == 0);
+    u8 *data = (u8 *)kmalloc(7 * 1024);
+    CHECK(data);
+    memset(data, 0x5a, 7 * 1024);
+    CHECK(file->write(0, data, 7 * 1024) == 7 * 1024);
+    u32 writes = disk->writes;
+    u32 free_inodes = disk->super()->s_free_inodes_count;
+    CHECK(root->makeDirectory("full-directory", 0755) == -28 && disk->writes == writes);
+    CHECK(disk->super()->s_free_inodes_count == free_inodes && disk->super()->s_state == 1);
+    CHECK(root->unlinkFile("full") == 0 && root->makeDirectory("reused", 0755) == 0);
+    CHECK(root->removeDirectory("reused") == 0);
+    kfree(data);
+    root->remove();
+
+    disk->reset(1024);
+    root = write_mount(disk);
+    CHECK(root);
+    for (u32 i = 0; i < 5; ++i) {
+        char name[] = "dir0";
+        name[3] += i;
+        CHECK(root->makeDirectory(name, 0755) == 0);
+    }
+    writes = disk->writes;
+    CHECK(root->makeDirectory("no-inode", 0755) == -28 && disk->writes == writes);
+    for (u32 i = 0; i < 5; ++i) {
+        char name[] = "dir0";
+        name[3] += i;
+        CHECK(root->removeDirectory(name) == 0);
+    }
+    CHECK(disk->super()->s_free_inodes_count == 5);
+    root->remove();
+
+    for (u32 which = 0; which < 3; ++which) {
+        disk->reset(1024);
+        root = write_mount(disk);
+        CHECK(root && root->makeDirectory("malformed", 0755) == 0);
+        Ext2Node *node = static_cast<Ext2Node *>(root->find("malformed"));
+        CHECK(node);
+        u32 block = disk->inode(node->inode())->i_block[0];
+        ext2_dir_entry *self = (ext2_dir_entry *)(disk->bytes + block * 1024);
+        ext2_dir_entry *parent = (ext2_dir_entry *)((u8 *)self + 12);
+        if (!which) self->inode = 2;
+        else if (which == 1) parent->inode = node->inode();
+        else self->inode = 0;
+        writes = disk->writes;
+        CHECK(root->removeDirectory("malformed") == -5 && disk->writes == writes);
+        root->remove();
+    }
+    disk->reset(1024);
+    disk->record(24)->inode = 7;
+    disk->record(24)->file_type = 2;
+    disk->inode(7)->i_mode = 0x41ed;
+    disk->inode(7)->i_size = 1024;
+    disk->inode(7)->i_block[0] = 9;
+    root = write_mount(disk);
+    CHECK(root && root->removeDirectory("note") == -13 && !disk->writes);
+    root->remove();
+    delete disk;
+    serial::write("[STORAGE] Directory allocation, validation and write failures verified\n");
+    return true;
+}
+
 bool verify_ata() {
     ata_init();
     ATADevice *disk = ata_primary_master();
