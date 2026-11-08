@@ -55,6 +55,7 @@ static void descriptors(void) {
     CHECK(open("/etc/motd", 8) == -22);
     CHECK(open("/etc/motd", 1) == -30);
     CHECK(open("/missing", 0) == -2);
+    CHECK(open("/", 0) == -21 && open("/etc", 2) == -21);
     int files[32], count = 0, fd;
     while ((fd = open("/etc/motd", 0)) >= 0) files[count++] = fd;
     CHECK(fd == -24 && count == 29);

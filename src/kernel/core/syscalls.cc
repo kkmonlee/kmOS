@@ -14,6 +14,7 @@ void Syscalls::init()
   add(SYS_execve, &call_execv);
   add(SYS_open, &call_open);
   add(SYS_close, &call_close);
+  add(SYS_lseek, &call_lseek);
   add(SYS_read, &call_read);
   add(SYS_dup2, &call_dup2);
   add(SYS_chdir, &call_chdir);

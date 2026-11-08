@@ -3,7 +3,7 @@
 ARCH=x86
 KERNEL=kernel.elf
 SDKDIR=../sdk
-INCDIR= -I ./ -I ./modules -I ./core -I ./arch/$(ARCH)
+INCDIR= -I ../sdk/include -I ./ -I ./modules -I ./core -I ./arch/$(ARCH)
 
 
 include ./arch/$(ARCH)/config.make

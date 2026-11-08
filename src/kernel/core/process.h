@@ -50,6 +50,7 @@ public:
   bool completeWait(Process *child);
   bool waitingFor(Process *child);
   u32 addFile(File *fp, u32 m);
+  int openFile(const char *path, u32 flags, u32 mode);
   File *getFile(u32 fd);
   int deleteFile(u32 fd);
   int duplicateFile(u32 from, u32 to);

@@ -419,6 +419,73 @@ def disk_mount(args, temp):
     print("PASS boot with truncated ext2 disk", flush=True)
 
 
+def disk_growth(args, temp):
+    with VM(args, "ext2-write-errors", append="test=storage-write") as vm:
+        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+        assert vm.process.wait(timeout=2) == 33, text
+        assert "[STORAGE] Allocation rollback and write failures verified" in text, text
+    print("PASS ext2 allocation rollback and failures during creation and growth", flush=True)
+
+    for tool in ("mke2fs", "e2fsck"):
+        assert shutil.which(tool), f"{tool} is missing; install e2fsprogs"
+    program = build_user_test(args, temp, "disk_growth_test.c", "init")
+    for name, block_size, options in (
+        ("1024", 1024, ["-g", "256", "-O", "^resize_inode"]),
+        ("2048", 2048, ["-g", "256", "-O", "^resize_inode"]),
+        ("4096", 4096, ["-g", "256", "-O", "^resize_inode"]),
+        ("default", 1024, []),
+        ("revision-0", 1024, ["-I", "128", "-O", "none"]),
+    ):
+        disk = temp / f"ext2-growth-{name}.img"
+        with disk.open("wb") as image:
+            image.truncate(8 * 1024 * 1024)
+        result = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", str(block_size),
+                                 "-N", "256", *options, str(disk)],
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        if name == "revision-0":
+            with disk.open("r+b") as image:
+                image.seek(1024 + 76)
+                image.write(struct.pack("<I", 0))
+                image.seek(1024 + 84)
+                image.write(bytes(1024 - 84))
+        for mode, marker in (("rw", "file creation, growth and sparse writes verified"),
+                             ("ro", "created files verified after reboot")):
+            argument = "disk=hda,rw" if mode == "rw" else "disk=hda"
+            with VM(args, f"ext2-growth-{name}-{mode}", append=f"user {argument}",
+                    module=program, disk=disk) as vm:
+                text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=30)
+                assert marker in text and "[USER] Exit status=00000000" in text, text
+                assert "[USER] Reaped init" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+            checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+            assert checked.returncode == 0, checked.stdout + checked.stderr
+        print(f"PASS ext2 creation, growth, sparse writes, reboot and fsck: {name}", flush=True)
+
+    for name, size, source, marker, counter in (
+        ("blocks", 64 * 1024, "disk_full_test.c", "full disk data verified", 12),
+        ("inodes", 1024 * 1024, "disk_inode_test.c", "inode exhaustion verified", 16),
+    ):
+        disk = temp / f"ext2-full-{name}.img"
+        with disk.open("wb") as image:
+            image.truncate(size)
+        made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", "1024",
+                               "-N", "32", "-O", "^resize_inode", str(disk)], capture_output=True, text=True)
+        assert made.returncode == 0, made.stdout + made.stderr
+        program = build_user_test(args, temp, source, "init")
+        for mode in ("rw", "ro"):
+            argument = "disk=hda,rw" if mode == "rw" else "disk=hda"
+            with VM(args, f"ext2-full-{name}-{mode}", append=f"user {argument}", module=program, disk=disk) as vm:
+                text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=30)
+                assert marker in text and "[USER] Exit status=00000000" in text, text
+                assert "[USER] Reaped init" in text and "[PANIC]" not in text, text
+            checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+            assert checked.returncode == 0, checked.stdout + checked.stderr
+            with disk.open("rb") as image:
+                image.seek(1024 + counter)
+                assert struct.unpack("<I", image.read(4))[0] == 0
+        print(f"PASS ext2 exhaustion, reboot and fsck: {name}", flush=True)
+
+
 def swap(args, temp):
     with VM(args, "swap-slots", append="test=swap") as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
@@ -738,6 +805,7 @@ def main():
         storage_and_user_regressions(args, Path(temp))
         swap(args, Path(temp))
         disk_mount(args, Path(temp))
+        disk_growth(args, Path(temp))
         user_heap(args, Path(temp))
         user_shell(args, Path(temp))
     boot(args, 64, "q35")

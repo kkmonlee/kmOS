@@ -8,7 +8,7 @@ all: $(PROGRAMS)
 %.o: %.asm
 	nasm -f elf32 $< -o $@
 
-%.o: %.c user.h
+%.o: %.c user.h ../sdk/include/fcntl.h
 	$(CROSS)-gcc $(CFLAGS) -c $< -o $@
 
 hello.elf: hello.o linker.ld

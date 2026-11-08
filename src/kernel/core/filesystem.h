@@ -19,6 +19,7 @@ public:
   void mknod(const char *module, const char *name, u32 flag);
 
   File *path(const char *p);
+  int open(const char *path, u32 flags, u32 mode, File *&file);
   File *path_parent(const char *p, char *fname, u32 size);
   bool get_path(File *file, char *buffer, u32 size);
 

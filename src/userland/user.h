@@ -1,6 +1,8 @@
 #ifndef USER_H
 #define USER_H
 
+#include "../sdk/include/fcntl.h"
+
 typedef unsigned int u32;
 
 static inline int syscall3(int number, u32 first, u32 second, u32 third) {
@@ -14,7 +16,17 @@ static inline int waitpid(int pid, int *status, int flags) { return syscall3(7, 
 static inline int execve(const char *path, const char *const *argv, const char *const *envp) {
     return syscall3(11, (u32)path, (u32)argv, (u32)envp);
 }
-static inline int open(const char *path, int flags) { return syscall3(5, (u32)path, flags, 0); }
+static inline int open(const char *path, int flags, ...) {
+    u32 mode = 0;
+    if (flags & O_CREAT) {
+        __builtin_va_list arguments;
+        __builtin_va_start(arguments, flags);
+        mode = __builtin_va_arg(arguments, u32);
+        __builtin_va_end(arguments);
+    }
+    return syscall3(5, (u32)path, flags, mode);
+}
+static inline int lseek(int fd, int offset, int origin) { return syscall3(19, fd, offset, origin); }
 static inline int close(int fd) { return syscall3(6, fd, 0, 0); }
 static inline int read(int fd, void *buffer, u32 count) { return syscall3(3, fd, (u32)buffer, count); }
 static inline int write(int fd, const void *buffer, u32 count) { return syscall3(4, fd, (u32)buffer, count); }

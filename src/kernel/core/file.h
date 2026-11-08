@@ -18,7 +18,7 @@ class File
 public:
   static const u32 kMaxNameLength = 255;
 
-  File(const char *n, u8 t);
+  File(const char *n, u8 t, bool sanitize = true);
   virtual ~File();
 
   virtual u32 open(u32 flag);
@@ -26,6 +26,7 @@ public:
   virtual u32 read(u32 pos, u8 *buffer, u32 size);
   virtual u32 write(u32 pos, u8 *buffer, u32 size);
   virtual u32 ioctl(u32 id, u8 *buffer);
+  virtual int createFile(const char *name, u32 mode, File *&file);
   virtual u32 remove();
   virtual void scan();
   virtual bool waitable() const { return false; }
@@ -55,7 +56,7 @@ public:
   File *getPrec();
   File *getLink();
   u8 getType();
-  u32 getSize();
+  virtual u32 getSize();
   u32 getInode();
 
   stat_fs stat();

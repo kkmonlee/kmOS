@@ -13,7 +13,8 @@ int main(void) {
             puts("disk write rejected\n");
             return 0;
         }
-        if (result != 1028 || write(fd, buffer, 273) != -27 || close(fd))
+        if (result != 1028 || lseek(fd, 0x7fffffff, SEEK_SET) != 0x7fffffff ||
+            write(fd, buffer, 1) != -27 || close(fd))
             return 2;
     } else if (fd != -30) {
         return 4;

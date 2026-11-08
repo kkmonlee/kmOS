@@ -21,17 +21,21 @@ class TestDisk : public BlockDevice {
 public:
     u8 bytes[65536];
     u32 block_size, root_block, file_block, inode_table, fail_block;
+    u32 writes, fail_write_after;
     TestDisk() : BlockDevice("storage-test") { reset(1024); }
     void reset(u32 size) {
         memset(bytes, 0, sizeof(bytes));
         block_size = size;
         fail_block = ~0U;
+        writes = 0;
+        fail_write_after = ~0U;
         u32 descriptor = size == 1024 ? 2 : 1;
         inode_table = descriptor + 3;
         root_block = inode_table + (16 * 128 + size - 1) / size;
         file_block = root_block + 1;
         ext2_super_block *sb = super();
         sb->s_magic = 0xef53;
+        sb->s_state = 1;
         sb->s_rev_level = 1;
         sb->s_first_ino = 11;
         sb->s_blocks_count = 16;
@@ -45,6 +49,22 @@ public:
         group->bg_block_bitmap = descriptor + 1;
         group->bg_inode_bitmap = descriptor + 2;
         group->bg_inode_table = inode_table;
+        sb->s_free_blocks_count = group->bg_free_blocks_count = 16 - file_block - 1;
+        sb->s_free_inodes_count = group->bg_free_inodes_count = 5;
+        group->bg_used_dirs_count = 1;
+        u8 *blocks = bytes + group->bg_block_bitmap * size;
+        memset(blocks, 0xff, size);
+        for (u32 block = file_block + 1; block < 16; ++block) {
+            u32 bit = block - sb->s_first_data_block;
+            blocks[bit / 8] &= ~(1U << (bit % 8));
+        }
+        u8 *inodes = bytes + group->bg_inode_bitmap * size;
+        memset(inodes, 0xff, size);
+        for (u32 bit = 11; bit < 16; ++bit) inodes[bit / 8] &= ~(1U << (bit % 8));
+        inode(2)->i_links_count = 2;
+        inode(2)->i_blocks = size / 512;
+        inode(11)->i_links_count = 1;
+        inode(11)->i_blocks = size / 512;
         inode(2)->i_mode = 0x41ed;
         inode(2)->i_size = size;
         inode(2)->i_block[0] = root_block;
@@ -77,7 +97,13 @@ public:
         memcpy(buffer, bytes + lba * 512, count * 512);
         return RETURN_OK;
     }
-    u32 write_blocks(u32, u32, const void *) override { return RETURN_FAILURE; }
+    u32 write_blocks(u32 lba, u32 count, const void *buffer) override {
+        if (!buffer || !count || lba >= sizeof(bytes) / 512 || count > sizeof(bytes) / 512 - lba)
+            return ERROR_PARAM;
+        if (writes++ >= fail_write_after) return RETURN_FAILURE;
+        memcpy(bytes + lba * 512, buffer, count * 512);
+        return RETURN_OK;
+    }
 };
 
 static bool valid_images(TestDisk *disk) {
@@ -151,6 +177,86 @@ bool verify_storage() {
     CHECK(valid_images(disk));
     delete disk;
     serial::write("[STORAGE] ext2 geometry, records, reads and errors verified\n");
+    return true;
+}
+
+static File *write_mount(TestDisk *disk) {
+    File *point = new File("storage-write", TYPE_DIRECTORY);
+    if (!point) return nullptr;
+    File *root = ext2_driver.mount(point, disk, true);
+    if (!root) delete point;
+    return root;
+}
+
+bool verify_storage_writes() {
+    TestDisk *disk = new TestDisk();
+    CHECK(disk);
+    File *root = write_mount(disk);
+    CHECK(root);
+    File *file = nullptr;
+    CHECK(root->createFile("created", 0644, file) == 0 && file);
+    u32 creation_writes = disk->writes;
+    root->remove();
+
+    for (u32 failure = 0; failure < creation_writes; ++failure) {
+        disk->reset(1024);
+        root = write_mount(disk);
+        CHECK(root);
+        disk->fail_write_after = failure;
+        file = nullptr;
+        CHECK(root->createFile("created", 0644, file) == -5 && !file);
+        CHECK(!root->find("created"));
+        u32 writes = disk->writes;
+        CHECK(root->createFile("retry", 0644, file) == -30 && disk->writes == writes);
+        CHECK(disk->super()->s_state == (failure ? 0 : 1));
+        root->remove();
+        if (failure) CHECK(!write_mount(disk));
+    }
+
+    disk->reset(1024);
+    root = write_mount(disk);
+    CHECK(root && root->createFile("created", 0644, file) == 0 && file);
+    u8 *snapshot = (u8 *)kmalloc(sizeof(disk->bytes));
+    u8 *data = (u8 *)kmalloc(8 * 1024);
+    CHECK(snapshot && data);
+    memset(data, 0x3a, 8 * 1024);
+    memcpy(snapshot, disk->bytes, sizeof(disk->bytes));
+    u32 writes = disk->writes;
+    CHECK(file->write(0, data, 8 * 1024) == (u32)-28);
+    CHECK(disk->writes == writes && file->getSize() == 0);
+    for (u32 i = 0; i < sizeof(disk->bytes); ++i) CHECK(disk->bytes[i] == snapshot[i]);
+    CHECK(file->write(0, data, 2048) == 2048 && file->getSize() == 2048);
+    u32 growth_writes = disk->writes - writes;
+    kfree(snapshot);
+    root->remove();
+
+    for (u32 failure = 0; failure < growth_writes; ++failure) {
+        disk->reset(1024);
+        root = write_mount(disk);
+        CHECK(root && root->createFile("created", 0644, file) == 0 && file);
+        disk->fail_write_after = disk->writes + failure;
+        CHECK(file->write(0, data, 2048) == (u32)-5);
+        writes = disk->writes;
+        CHECK(file->write(0, data, 1) == (u32)-30 && disk->writes == writes);
+        CHECK(disk->super()->s_state == (failure ? 0 : 1));
+        root->remove();
+    }
+    for (u32 which = 0; which < 2; ++which) {
+        disk->reset(1024);
+        disk->inode(11)->i_mode = 0x81a4;
+        disk->inode(11)->i_size = 2048;
+        disk->inode(11)->i_block[1] = disk->file_block;
+        if (which) disk->inode(11)->i_blocks = ~0U;
+        root = write_mount(disk);
+        CHECK(root);
+        file = root->find("note");
+        CHECK(file && file->write(0, data, 2048) == (u32)-5);
+        CHECK(!disk->writes && disk->super()->s_state == 1);
+        root->remove();
+    }
+    kfree(data);
+    delete disk;
+    serial::write("[STORAGE] Allocation rollback and write failures verified\n");
     return true;
 }
 

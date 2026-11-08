@@ -116,7 +116,8 @@ public:
     Ext2Directory(const char* name, Ext2Mount* mount, u32 inode);
     virtual ~Ext2Directory();
     bool load();
-    virtual void scan() override;
+    void scan() override;
+    int createFile(const char *name, u32 mode, File *&file) override;
 
 private:
     bool loaded_;
@@ -127,6 +128,7 @@ public:
     Ext2RegularFile(const char* name, Ext2Mount* mount, u32 inode, u32 size);
     u32 open(u32 flags) override;
     u32 close() override { return 0; }
+    u32 getSize() override;
     u32 read(u32 pos, u8* buffer, u32 size) override;
     u32 write(u32 pos, u8* buffer, u32 size) override;
 };

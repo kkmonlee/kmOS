@@ -37,12 +37,12 @@ static void strreplace(char *s, char a, char to)
 
 u32 File::inode_system = 0;
 
-File::File(const char *n, u8 t)
+File::File(const char *n, u8 t, bool sanitize)
 {
   name = n ? (char *)kmalloc(strlen(n) + 1) : nullptr;
   if (name) memcpy(name, n, strlen(n) + 1);
 
-  checkName();
+  if (sanitize) checkName();
   master = arch.pcurrent;
   inode = inode_system++;
   references = 0;
@@ -202,6 +202,11 @@ u32 File::close() { return NOT_DEFINED; }
 u32 File::read(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
 u32 File::write(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
 u32 File::ioctl(u32 /*id*/, u8 * /*buffer*/) { return NOT_DEFINED; }
+int File::createFile(const char *, u32, File *&file) {
+  file = nullptr;
+  return -30;
+}
+
 u32 File::remove()
 {
   u32 flags = irq_save();

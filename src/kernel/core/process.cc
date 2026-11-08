@@ -5,6 +5,7 @@
 #include <runtime/alloc.h>
 #include <arch/x86/architecture.h>
 #include <filesystem.h>
+#include <fcntl.h>
 
 extern "C" {
   int strlen(const char *s);
@@ -376,6 +377,24 @@ u32 Process::addFile(File *file, u32 mode)
   if (!memory) { file->close(); return (u32)-12; }
   openfp[fd] = new (memory) openfile(file, mode & 3);
   close_on_exec[fd] = (mode & 0x80000) != 0;
+  return fd;
+}
+
+int Process::openFile(const char *path, u32 flags, u32 mode) {
+  IRQGuard guard;
+  if ((flags & ~(O_CREAT | O_EXCL | O_CLOEXEC | 3U)) || (flags & 3) == 3 ||
+      ((flags & O_EXCL) && !(flags & O_CREAT))) return -22;
+  u32 fd = 0;
+  while (fd < CONFIG_MAX_FILE && openfp[fd]) ++fd;
+  if (fd == CONFIG_MAX_FILE) return -24;
+  void *memory = kmalloc(sizeof(openfile));
+  if (!memory) return -12;
+  File *file = nullptr;
+  int result = fsm.open(path, flags, mode, file);
+  if (!result) result = file->open(flags & 3);
+  if (result < 0) { kfree(memory); return result; }
+  openfp[fd] = new (memory) openfile(file, flags & 3);
+  close_on_exec[fd] = (flags & O_CLOEXEC) != 0;
   return fd;
 }
 

@@ -3,6 +3,7 @@
 #include <filesystem_driver.h>
 #include <core/block_device.h>
 #include <memory_file.h>
+#include <fcntl.h>
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
@@ -62,6 +63,22 @@ File *Filesystem::getRoot()
 File *Filesystem::path(const char *p)
 {
   return resolve(p, nullptr, 0);
+}
+
+int Filesystem::open(const char *name, u32 flags, u32 mode, File *&file) {
+  IRQGuard guard;
+  file = path(name);
+  if (file) {
+    if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) return -17;
+    return file->getType() == TYPE_FILE || file->getType() == TYPE_DEVICE ? 0 : -21;
+  }
+  if (!(flags & O_CREAT)) return -2;
+  char leaf[File::kMaxNameLength + 1];
+  File *parent = path_parent(name, leaf, sizeof(leaf));
+  if (!parent) return -2;
+  if (parent->getType() != TYPE_DIRECTORY) return -20;
+  int result = parent->createFile(leaf, mode, file);
+  return result ? result : 1;
 }
 
 File *Filesystem::resolve(const char *p, char *fname, u32 size)

@@ -3,6 +3,7 @@
 
 void call_open();
 void call_close();
+void call_lseek();
 void call_read();
 void call_write();
 void call_exit();

@@ -2,6 +2,7 @@
 #include <process.h>
 #include <architecture.h>
 #include <filesystem.h>
+#include <fcntl.h>
 #include <cow.h>
 #include <memory_file.h>
 #include <api/kernel/syscall_table.h>
@@ -18,13 +19,22 @@ void call_open() {
   int result = vmm.user_string(process->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
   if (bad_pointer(result != -14)) return;
   if (result) { arch.setRet(result); return; }
-  File *file = fsm.path(path);
-  if (!file) { arch.setRet((u32)-2); return; }
-  if (file->getType() != TYPE_FILE && file->getType() == TYPE_FILE) {
-    arch.setRet((u32)-21);
-    return;
-  }
-  arch.setRet(process->addFile(file, arch.getArg(1)));
+  arch.setRet(process->openFile(path, arch.getArg(1), arch.getArg(2)));
+}
+
+void call_lseek() {
+  Process *process = arch.pcurrent;
+  File *file = process->getFile(arch.getArg(0));
+  openfile *description = process->getFileInfo(arch.getArg(0));
+  if (!file) { arch.setRet((u32)-9); return; }
+  if (file->getType() != TYPE_FILE) { arch.setRet((u32)-29); return; }
+  u32 origin = arch.getArg(2);
+  if (origin > SEEK_END) { arch.setRet((u32)-22); return; }
+  s64 base = origin == SEEK_CUR ? description->ptr : (origin == SEEK_END ? file->getSize() : 0);
+  s64 position = base + (s32)arch.getArg(1);
+  if (position < 0 || position > 0x7fffffff) { arch.setRet((u32)-22); return; }
+  description->ptr = (u32)position;
+  arch.setRet(description->ptr);
 }
 
 void call_close() { arch.setRet(arch.pcurrent->deleteFile(arch.getArg(0))); }
