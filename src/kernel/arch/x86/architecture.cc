@@ -473,11 +473,7 @@ void Architecture::notify_exit(Process *process) {
         }
         cursor = cursor->pnext;
     } while (cursor && cursor != plist);
-    Process *parent = process->pparent;
-    if (parent) {
-        parent->sendSignal(SIGCHLD);
-        parent->completeWait(process);
-    }
+    if (process->pparent) process->pparent->childExited(process);
 }
 
 void Architecture::save_process_context(Process *proc, const InterruptFrame *frame)
@@ -606,6 +602,29 @@ InterruptFrame *Architecture::suspend_process(InterruptFrame *frame) {
     return load_process_context(pcurrent);
 }
 
+InterruptFrame *Architecture::return_to_user(InterruptFrame *frame) {
+    while ((frame->cs & 3) == 3 && pcurrent) {
+        int signal = pcurrent->deliverSignal(*frame);
+        if (!signal) break;
+        frame = finish_process(128 + signal, signal);
+    }
+    return frame;
+}
+
+void Architecture::save_signal_fpu(u8 *state) {
+    if (!has_fpu) return;
+    process_st *info = pcurrent->getPInfo();
+    save_fpu(info);
+    memcpy(state, fpu_state(info), sizeof(initial_fpu_state));
+}
+
+void Architecture::restore_signal_fpu(const u8 *state) {
+    if (!has_fpu) return;
+    process_st *info = pcurrent->getPInfo();
+    memcpy(fpu_state(info), state, sizeof(initial_fpu_state));
+    load_fpu(info);
+}
+
 bool Architecture::replace_image(process_st *info, process_st *image) {
     if (!info || !image || !image->pd || !info->syscall_frame) return false;
     page_directory *old = info->pd;
@@ -624,9 +643,7 @@ bool Architecture::replace_image(process_st *info, process_st *image) {
     info->regs.eflags = 0x202;
     info->regs.cr3 = info->pd->physical_address;
     info->interrupt_stack = info->syscall_frame;
-    info->signal = 0;
     info->fpu_initialized = false;
-    memset(info->sigfn, 0, sizeof(info->sigfn));
     load_process_context(pcurrent);
     vmm.destroy_page_directory(old);
     return true;

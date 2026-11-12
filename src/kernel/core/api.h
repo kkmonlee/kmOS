@@ -21,6 +21,8 @@ void call_getppid();
 void call_sbrk();
 void call_pipe();
 void call_kill();
+void call_sigaction();
+void call_sigreturn();
 void call_setpgid();
 void call_ioctl();
 

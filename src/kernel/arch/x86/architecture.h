@@ -44,6 +44,9 @@ public:
   InterruptFrame *handle_timer_interrupt(InterruptFrame *frame);
   InterruptFrame *finish_process(int status, int signal = 0);
   InterruptFrame *suspend_process(InterruptFrame *frame);
+  InterruptFrame *return_to_user(InterruptFrame *frame);
+  void save_signal_fpu(u8 *state);
+  void restore_signal_fpu(const u8 *state);
   void notify_exit(Process *process);
   u32 process_count();
   bool replace_image(process_st *info, process_st *image);

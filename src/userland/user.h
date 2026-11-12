@@ -2,6 +2,7 @@
 #define USER_H
 
 #include "../sdk/include/fcntl.h"
+#include "../sdk/include/signal.h"
 
 typedef unsigned int u32;
 
@@ -40,6 +41,16 @@ static inline int getppid(void) { return syscall3(64, 0, 0, 0); }
 static inline int chdir(const char *path) { return syscall3(12, (u32)path, 0, 0); }
 static inline int pipe(int fds[2]) { return syscall3(42, (u32)fds, 0, 0); }
 static inline int kill(int pid, int signal) { return syscall3(37, pid, signal, 0); }
+extern void __kmos_sigreturn(void);
+
+static inline int sigaction(int signal, const struct sigaction *action, struct sigaction *previous) {
+    int result;
+    __asm__ volatile("int $0x80" : "=a"(result)
+                     : "a"(67), "b"(signal), "c"(action), "d"(previous), "S"(__kmos_sigreturn)
+                     : "memory", "cc");
+    return result;
+}
+
 static inline int setpgid(int pid, int group) { return syscall3(57, pid, group, 0); }
 static inline int set_foreground(int group) { return syscall3(54, 0, 1, group); }
 

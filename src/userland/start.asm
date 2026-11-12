@@ -18,4 +18,11 @@ _start:
     mov eax, 1
     int 0x80
     ud2
+
+global __kmos_sigreturn
+__kmos_sigreturn:
+    mov eax, 68
+    int 0x80
+    ud2
+
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -139,7 +139,11 @@ void call_write() {
 void call_exit() { arch.pcurrent->exit(arch.getArg(0)); }
 void call_fork() { arch.setRet(arch.pcurrent->fork()); }
 void call_dup2() { arch.setRet(arch.pcurrent->duplicateFile(arch.getArg(0), arch.getArg(1))); }
-void call_wait() { arch.setRet(arch.pcurrent->wait((int)arch.getArg(0), arch.getArg(1), arch.getArg(2))); }
+void call_wait() {
+  Process *process = arch.pcurrent;
+  int result = process->wait((int)arch.getArg(0), arch.getArg(1), arch.getArg(2));
+  if (process->getState() != SLEEPING) arch.setRet(result);
+}
 void call_getpid() { arch.setRet(arch.pcurrent->getPid()); }
 void call_getppid() {
   Process *parent = arch.pcurrent->getPParent();
@@ -147,6 +151,15 @@ void call_getppid() {
 }
 
 void call_kill() { arch.setRet(signal_processes(arch.getArg(0), arch.getArg(1))); }
+
+void call_sigaction() {
+  arch.setRet(arch.pcurrent->setSignalAction(arch.getArg(0), arch.getArg(1), arch.getArg(2), arch.getArg(3)));
+}
+
+void call_sigreturn() {
+  int result = arch.pcurrent->returnFromSignal();
+  if (result) arch.setRet(result);
+}
 
 void call_setpgid() { arch.setRet(arch.pcurrent->setGroup(arch.getArg(0), arch.getArg(1))); }
 

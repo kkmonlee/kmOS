@@ -14,6 +14,9 @@
 #define SLEEPING 2
 #define READY 4
 
+struct InterruptFrame;
+struct SignalContext;
+
 struct openfile : public File
 {
   openfile(File *file, u32 flags);
@@ -42,14 +45,16 @@ public:
 
   u32 create(const void *file, u32 size, int argc, const char *const *argv);
   void sendSignal(int sig);
+  int setSignalAction(int sig, u32 action, u32 previous, u32 restorer);
+  int returnFromSignal();
+  int deliverSignal(InterruptFrame &frame);
   bool isUser() const;
   u32 getGroup() const { return group; }
   int setGroup(u32 pid, u32 group);
   void waitForFile(File *file, u32 syscall);
   static void wakeFile(File *file);
   int wait(int child, u32 status, u32 options);
-  bool completeWait(Process *child);
-  bool waitingFor(Process *child);
+  void childExited(Process *child);
   u32 addFile(File *fp, u32 m);
   int openFile(const char *path, u32 flags, u32 mode);
   File *getFile(u32 fd);
@@ -112,6 +117,24 @@ protected:
   u32 time_slice;
 
   static char *default_tty;
+
+private:
+  bool waitingFor(Process *child);
+  bool completeWait(Process *child);
+  void blockSyscall(u32 syscall);
+  bool inheritSignals(const Process &parent);
+  void clearSignalContexts();
+  void resetSignalActions();
+
+  struct SignalAction {
+    struct sigaction action;
+    u32 restorer;
+  };
+  SignalAction signal_actions[SIGCHLD + 1] = {};
+  u32 pending_signals = 0;
+  u32 blocked_signals = 0;
+  SignalContext *signal_context = nullptr;
+  bool retry_syscall = false;
 };
 
 int signal_processes(s32 pid, int signal);

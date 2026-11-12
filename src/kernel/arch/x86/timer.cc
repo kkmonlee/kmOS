@@ -10,7 +10,7 @@ extern "C" {
         timer_interrupt_count++;
         pit.tick();
         poll_console();
-        return arch.handle_timer_interrupt(frame);
+        return arch.return_to_user(arch.handle_timer_interrupt(frame));
     }
     
     u32 get_timer_interrupt_count() {

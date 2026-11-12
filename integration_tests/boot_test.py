@@ -320,6 +320,23 @@ def storage(args, ram):
     print(f"PASS ext2 valid images, malformed metadata and I/O errors: {ram} MB", flush=True)
 
 
+def user_signals(args, temp):
+    program = build_user_test(args, temp, "signal_test.c", "init")
+    with VM(args, "signal-handlers", append="user", module=program) as vm:
+        text = vm.wait(lambda text: "running signal ready" in text or "signal test failed" in text)
+        assert "signal test failed" not in text, text
+        vm.send_serial(b"\x03")
+        for count in range(1, 7):
+            text = vm.wait(lambda text: text.count("blocked signal ready") >= count or "signal test failed" in text)
+            assert "signal test failed" not in text, text
+            time.sleep(0.05)
+            vm.send_serial(b"x")
+        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+        assert "signal handlers and syscall restart verified" in text and "[USER] Exit status=00000000" in text, text
+        assert "[USER] Reaped init" in text and "[PANIC]" not in text and "Frame leak" not in text, text
+    print("PASS signal handlers, inheritance, interrupted and restarted syscalls", flush=True)
+
+
 def user_shell(args, temp):
     program = build_user_test(args, temp, "pipe_test.c", "init")
     with VM(args, "pipe-signal", append="user", module=program) as vm:
@@ -1012,6 +1029,7 @@ def main():
         disk_directories(args, Path(temp))
         disk_indexed_directories(args, Path(temp))
         user_heap(args, Path(temp))
+        user_signals(args, Path(temp))
         user_shell(args, Path(temp))
     boot(args, 64, "q35")
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")

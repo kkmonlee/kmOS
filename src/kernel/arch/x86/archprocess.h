@@ -33,8 +33,6 @@ extern "C"
     char *b_heap;
     char *e_heap;
 
-    u32 signal;
-    void *sigfn[32];
     void *vinfo;
     u32 interrupt_stack;
     u32 kernel_stack_top;

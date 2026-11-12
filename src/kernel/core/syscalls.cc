@@ -27,6 +27,8 @@ void Syscalls::init()
   add(SYS_sbrk, &call_sbrk);
   add(SYS_pipe, &call_pipe);
   add(SYS_kill, &call_kill);
+  add(SYS_sigaction, &call_sigaction);
+  add(SYS_sigreturn, &call_sigreturn);
   add(SYS_setpgid, &call_setpgid);
   add(SYS_ioctl, &call_ioctl);
 }
@@ -52,7 +54,7 @@ extern "C" InterruptFrame *isr_syscall(InterruptFrame *frame)
   process->getPInfo()->syscall_frame = (u32)frame;
   if (!syscall.call(frame->eax)) frame->eax = (u32)-38;
   process->getPInfo()->syscall_frame = 0;
-  if (process->getState() == ZOMBIE) return arch.finish_process(process->getExitStatus());
-  if (process->getState() == SLEEPING) return arch.suspend_process(frame);
-  return frame;
+  if (process->getState() == ZOMBIE) frame = arch.finish_process(process->getExitStatus());
+  else if (process->getState() == SLEEPING) frame = arch.suspend_process(frame);
+  return arch.return_to_user(frame);
 }

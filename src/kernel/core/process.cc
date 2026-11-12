@@ -4,6 +4,7 @@
 #include <arch/x86/vmm.h>
 #include <runtime/alloc.h>
 #include <arch/x86/architecture.h>
+#include <api/kernel/syscall_table.h>
 #include <filesystem.h>
 #include <fcntl.h>
 
@@ -23,6 +24,26 @@ extern "C" {
 
 extern Architecture arch;
 extern Filesystem fsm;
+
+struct SignalContext {
+  InterruptFrame frame;
+  SignalContext *previous;
+  u32 mask;
+  bool restart;
+  u8 fpu[512];
+};
+
+static constexpr u32 syscall_instruction_size = 2;
+
+static bool supported_signal(int sig) {
+  return sig == SIGINT || sig == SIGKILL || sig == SIGPIPE || sig == SIGTERM || sig == SIGCHLD;
+}
+
+static u32 signal_bit(int sig) { return 1U << (sig - 1); }
+
+static bool ignored_signal(int sig, const struct sigaction &action) {
+  return action.sa_handler == SIG_IGN || (sig == SIGCHLD && action.sa_handler == SIG_DFL);
+}
 
 char *Process::default_tty = const_cast<char*>("/dev/tty");
 u32 Process::proc_pid = 0;
@@ -47,6 +68,7 @@ u32 openfile::close() {
 /* Destructor */
 Process::~Process()
 {
+  clearSignalContexts();
   closeFiles();
   if (cdir) cdir->release();
   if (info.pd) {
@@ -169,11 +191,25 @@ bool Process::completeWait(Process *child) {
     return false;
   }
   info.regs.eax = error ? (u32)error : child->pid;
-  ((InterruptFrame *)info.interrupt_stack)->eax = info.regs.eax;
+  info.regs.eip += syscall_instruction_size;
+  retry_syscall = false;
   waiting = false;
   state = READY;
   child->collected = !error;
   return true;
+}
+
+void Process::childExited(Process *child) {
+  if (signal_actions[SIGCHLD].action.sa_handler == SIG_IGN) {
+    child->collected = true;
+    if (waitingFor(child)) {
+      waiting = false;
+      state = READY;
+    }
+    return;
+  }
+  completeWait(child);
+  sendSignal(SIGCHLD);
 }
 
 int Process::wait(int child, u32 status, u32 options) {
@@ -207,7 +243,7 @@ int Process::wait(int child, u32 status, u32 options) {
   waiting = true;
   wait_child = child;
   wait_status = status;
-  state = SLEEPING;
+  blockSyscall(SYS_waitpid);
   return 0;
 }
 
@@ -218,6 +254,10 @@ int Process::fork()
   void *memory = kmalloc(sizeof(Process));
   if (!memory) return -12;
   Process *child = new (memory) Process(getName());
+  if (!child->inheritSignals(*this)) {
+    delete child;
+    return -12;
+  }
   
   child->pparent = this;
   child->group = group;
@@ -278,6 +318,7 @@ void Process::exit(int status, int signal)
   exit_signal = signal;
   waiting = false;
   waiting_file = nullptr;
+  clearSignalContexts();
   closeFiles();
   if (cdir) cdir->release();
   cdir = nullptr;
@@ -308,6 +349,7 @@ int Process::exec(const char *path, int argc, const char *const *argv, int envc,
     vmm.destroy_page_directory(replacement.pd);
     return -22;
   }
+  resetSignalActions();
   closeFiles(true);
   const char *name = path;
   for (const char *p = path; *p; ++p) if (*p == '/') name = p + 1;
@@ -475,12 +517,132 @@ bool Process::isUser() const {
 }
 
 void Process::sendSignal(int sig) {
-  if (sig && sig != SIGCHLD && isUser()) exit(128 + sig, sig);
+  if (!supported_signal(sig) || state == ZOMBIE || !isUser()) return;
+  const struct sigaction &action = signal_actions[sig].action;
+  if (ignored_signal(sig, action)) return;
+  u32 bit = signal_bit(sig);
+  if (!(blocked_signals & bit)) {
+    if (action.sa_handler == SIG_DFL) {
+      exit(128 + sig, sig);
+      return;
+    }
+    if (state == SLEEPING) {
+      waiting = false;
+      waiting_file = nullptr;
+      state = READY;
+    }
+  }
+  pending_signals |= bit;
+}
+
+int Process::setSignalAction(int sig, u32 address, u32 previous, u32 restorer) {
+  if (!supported_signal(sig) || (address && sig == SIGKILL)) return -22;
+  struct sigaction action;
+  int error;
+  if (address) {
+    if (!vmm.copy_from_user(info.pd, &action, address, sizeof(action), &error)) return error;
+    if (action.sa_flags & ~SA_RESTART) return -22;
+    action.sa_mask &= ~(signal_bit(SIGKILL) | signal_bit(SIGSTOP));
+    if (action.sa_handler != SIG_DFL && action.sa_handler != SIG_IGN &&
+        (!vmm.user_range(info.pd, (u32)action.sa_handler, 1) || !vmm.user_range(info.pd, restorer, 1)))
+      return -14;
+  }
+  SignalAction &entry = signal_actions[sig];
+  if (previous && !vmm.copy_to_user(info.pd, previous, &entry.action, sizeof(entry.action), &error)) return error;
+  if (address) {
+    entry = {action, restorer};
+    if (ignored_signal(sig, action)) pending_signals &= ~signal_bit(sig);
+  }
+  return 0;
+}
+
+int Process::deliverSignal(InterruptFrame &frame) {
+  bool retry = retry_syscall;
+  retry_syscall = false;
+  while (u32 available = pending_signals & ~blocked_signals) {
+    int sig = __builtin_ctz(available) + 1;
+    u32 bit = signal_bit(sig);
+    pending_signals &= ~bit;
+    const SignalAction &entry = signal_actions[sig];
+    if (ignored_signal(sig, entry.action)) continue;
+    if (entry.action.sa_handler == SIG_DFL) return sig;
+    if (frame.useresp < 32 || !vmm.user_range(info.pd, (u32)entry.action.sa_handler, 1) ||
+        !vmm.user_range(info.pd, entry.restorer, 1)) return SIGSEGV;
+
+    SignalContext *context = (SignalContext *)kmalloc(sizeof(SignalContext));
+    if (!context) return SIGSEGV;
+    u32 stack = (frame.useresp & ~15U) - 16 - sizeof(u32);
+    u32 arguments[] = {entry.restorer, (u32)sig};
+    if (!vmm.copy_to_user(info.pd, stack, arguments, sizeof(arguments))) {
+      kfree(context);
+      return SIGSEGV;
+    }
+    context->frame = frame;
+    context->mask = blocked_signals;
+    context->restart = retry && (entry.action.sa_flags & SA_RESTART);
+    if (retry && !context->restart) {
+      context->frame.eip += syscall_instruction_size;
+      context->frame.eax = (u32)-4;
+    }
+    arch.save_signal_fpu(context->fpu);
+    context->previous = signal_context;
+    signal_context = context;
+    blocked_signals |= bit | entry.action.sa_mask;
+    frame.eip = (u32)entry.action.sa_handler;
+    frame.useresp = stack;
+    constexpr u32 trap = 1U << 8, direction = 1U << 10, resume = 1U << 16;
+    frame.eflags &= ~(trap | direction | resume);
+    break;
+  }
+  return 0;
+}
+
+int Process::returnFromSignal() {
+  if (!signal_context) return -22;
+  SignalContext *context = signal_context;
+  signal_context = context->previous;
+  blocked_signals = context->mask;
+  retry_syscall = context->restart;
+  *(InterruptFrame *)info.syscall_frame = context->frame;
+  arch.restore_signal_fpu(context->fpu);
+  kfree(context);
+  return 0;
+}
+
+bool Process::inheritSignals(const Process &parent) {
+  memcpy(signal_actions, parent.signal_actions, sizeof(signal_actions));
+  blocked_signals = parent.blocked_signals;
+  SignalContext **tail = &signal_context;
+  for (const SignalContext *context = parent.signal_context; context; context = context->previous) {
+    SignalContext *copy = (SignalContext *)kmalloc(sizeof(SignalContext));
+    if (!copy) return false;
+    *copy = *context;
+    copy->previous = nullptr;
+    *tail = copy;
+    tail = &copy->previous;
+  }
+  return true;
+}
+
+void Process::clearSignalContexts() {
+  while (signal_context) {
+    SignalContext *context = signal_context;
+    signal_context = context->previous;
+    kfree(context);
+  }
+  blocked_signals = 0;
+  retry_syscall = false;
+}
+
+void Process::resetSignalActions() {
+  for (SignalAction &entry : signal_actions)
+    if (entry.action.sa_handler != SIG_IGN) entry = {};
+  pending_signals &= ~signal_bit(SIGCHLD);
+  clearSignalContexts();
 }
 
 int signal_processes(s32 pid, int sig) {
-  if (sig != 0 && sig != SIGINT && sig != SIGKILL && sig != SIGPIPE && sig != SIGTERM)
-    return -22;
+  if (sig && !supported_signal(sig)) return -22;
   u32 group = pid < 0 ? 0U - (u32)pid : arch.pcurrent->getGroup();
   bool found = false;
   Process *process = arch.plist;
@@ -519,10 +681,15 @@ int Process::setGroup(u32 target_pid, u32 target_group) {
 }
 
 void Process::waitForFile(File *file, u32 syscall) {
-  InterruptFrame *frame = (InterruptFrame *)info.syscall_frame;
-  frame->eip -= 2;
-  frame->eax = syscall;
   waiting_file = file;
+  blockSyscall(syscall);
+}
+
+void Process::blockSyscall(u32 syscall) {
+  InterruptFrame *frame = (InterruptFrame *)info.syscall_frame;
+  frame->eip -= syscall_instruction_size;
+  frame->eax = syscall;
+  retry_syscall = true;
   state = SLEEPING;
 }
 
