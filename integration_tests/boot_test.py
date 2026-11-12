@@ -645,6 +645,49 @@ def disk_directories(args, temp):
     print("PASS recovery of removed working directories after interrupted execution", flush=True)
 
 
+def disk_indexed_directories(args, temp):
+    disk = temp / "ext2-indexed-directories.img"
+    with disk.open("wb") as image:
+        image.truncate(8 * 1024 * 1024)
+    made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", "1024", "-I", "128",
+                           "-O", "dir_index,^resize_inode", str(disk)], capture_output=True, text=True)
+    assert made.returncode == 0, made.stdout + made.stderr
+    directories = ("create", "mkdir", "unlink", "rmdir", "keep")
+    commands = temp / "indexed-directory-fixture"
+    payload = temp / "indexed-directory-payload"
+    payload.write_bytes(b"s")
+    seed = [f"mkdir /{name}" for name in directories]
+    seed.extend(f"write /dev/null /{name}/entry-{i:03d}-long-enough-for-multiple-directory-blocks"
+                for name in directories for i in range(96))
+    seed.extend([f"write {payload} /create/original", "write /dev/null /unlink/old",
+                 "mkdir /rmdir/empty", "mkdir /keep/busy", "write /dev/null /keep/busy/file"])
+    commands.write_text("\n".join(seed) + "\n")
+    seeded = subprocess.run(["debugfs", "-w", "-f", str(commands), str(disk)], capture_output=True, text=True)
+    assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+    optimized = subprocess.run(["e2fsck", "-f", "-y", "-D", str(disk)], capture_output=True, text=True)
+    assert optimized.returncode in (0, 1), optimized.stdout + optimized.stderr
+
+    def indexed(name):
+        report = subprocess.run(["debugfs", "-R", f"stat /{name}", str(disk)], capture_output=True, text=True)
+        flags = re.search(r"Flags: (0x[0-9a-fA-F]+)", report.stdout)
+        assert report.returncode == 0 and flags, report.stdout + report.stderr
+        return bool(int(flags.group(1), 16) & 0x1000)
+
+    assert all(indexed(name) for name in directories)
+    program = build_user_test(args, temp, "disk_indexed_directory_test.c", "init")
+    for mode, marker in (("rw", "indexed ext2 directories modified"),
+                         ("ro", "indexed ext2 directory changes verified after reboot")):
+        argument = "disk=hda,rw" if mode == "rw" else "disk=hda"
+        with VM(args, f"ext2-indexed-directories-{mode}", append=f"user {argument}", module=program, disk=disk) as vm:
+            text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+            assert marker in text and "[USER] Exit status=00000000" in text, text
+            assert "[USER] Reaped init" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+        assert [name for name in directories if indexed(name)] == ["keep"]
+        checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+    print("PASS ext2 changes to indexed directories and read-only reboot", flush=True)
+
+
 def swap(args, temp):
     with VM(args, "swap-slots", append="test=swap") as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
@@ -967,6 +1010,7 @@ def main():
         disk_growth(args, Path(temp))
         disk_remove(args, Path(temp))
         disk_directories(args, Path(temp))
+        disk_indexed_directories(args, Path(temp))
         user_heap(args, Path(temp))
         user_shell(args, Path(temp))
     boot(args, 64, "q35")

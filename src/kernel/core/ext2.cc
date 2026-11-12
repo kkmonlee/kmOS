@@ -24,6 +24,7 @@ static constexpr u32 EXT2_RESIZE_INODE = 16;
 static constexpr u32 EXT2_DIR_INDEX = 32;
 static constexpr u32 EXT2_IMMUTABLE = 0x10;
 static constexpr u32 EXT2_APPEND = 0x20;
+static constexpr u32 EXT2_INDEX = 0x1000;
 static constexpr u16 EXT2_MODE_TYPE = 0xf000;
 static constexpr u16 EXT2_MODE_FILE = 0x8000;
 static constexpr u16 EXT2_MODE_DIR = 0x4000;
@@ -812,7 +813,6 @@ int Ext2Mount::create_node(Ext2Directory *dir, const char *name, u32 mode, bool 
     if ((directory.i_mode & EXT2_MODE_TYPE) != EXT2_MODE_DIR ||
         !(directory.i_mode & 0222) || !(directory.i_mode & 0111) ||
         (directory.i_flags & (EXT2_IMMUTABLE | EXT2_APPEND))) return -13;
-    if (directory.i_flags & 0x1000) return -95;
     if (directory.i_links_count < 2) return -5;
     if (is_directory && directory.i_links_count == 0xffff) return -31;
 
@@ -895,6 +895,7 @@ int Ext2Mount::create_node(Ext2Directory *dir, const char *name, u32 mode, bool 
         ++directory.i_links_count;
     }
     transaction.store_inode(number, inode);
+    directory.i_flags &= ~EXT2_INDEX;
     transaction.store_inode(dir->inode(), directory);
 
     File *created = is_directory ? static_cast<File *>(new Ext2Directory(name, this, number))
@@ -981,7 +982,6 @@ int Ext2Mount::remove_node(Ext2Directory *dir, const char *name, bool is_directo
     if (!read_inode(dir->inode(), &directory) || !read_inode(node->inode(), &inode)) return -5;
     if (!(directory.i_mode & 0222) || !(directory.i_mode & 0111) ||
         (directory.i_flags & (EXT2_IMMUTABLE | EXT2_APPEND))) return -13;
-    if (directory.i_flags & 0x1000) return -95;
     int error = 0;
     if (is_directory) {
         if (node->inode() == EXT2_ROOT_INO) return -16;
@@ -1037,9 +1037,12 @@ int Ext2Mount::remove_node(Ext2Directory *dir, const char *name, bool is_directo
     if (is_directory) {
         inode.i_links_count = 0;
         --directory.i_links_count;
-        transaction.store_inode(dir->inode(), directory);
     } else {
         --inode.i_links_count;
+    }
+    if (is_directory || (directory.i_flags & EXT2_INDEX)) {
+        directory.i_flags &= ~EXT2_INDEX;
+        transaction.store_inode(dir->inode(), directory);
     }
     if (!inode.i_links_count) {
         if (inode_referenced(node->inode())) {

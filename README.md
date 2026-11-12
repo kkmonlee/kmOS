@@ -7,71 +7,44 @@
   <a href="https://github.com/kkmonlee/kmOS/actions/workflows/nightly.yml"><img src="https://github.com/kkmonlee/kmOS/actions/workflows/nightly.yml/badge.svg" alt="Nightly validation"></a>
 </p>
 
-kmOS is a UNIX-like operating system for 32-bit x86, written in C++ and assembly.
-It's a personal project built around a monolithic kernel, with most of the work
-focused on memory management and processes.
-
 <p align="center">
   <img src="media/fetch.png" width="720" alt="kmOS running in QEMU">
 </p>
 
+## Specifications
+
+- UNIX-like monolithic kernel for 32-bit x86
+- Kernel in C++ and assembly
+- Multiboot and GRUB
+- VGA and serial consoles
+- Demand paging, copy-on-write and disk swap
+- ELF programs, `fork`, `execve` and `waitpid`
+- Userspace shell with pipes and Ctrl-C
+- ext2 reads and writes
+
 ## Build and run
 
-You'll need an `i686-elf` GCC/binutils toolchain, NASM, QEMU, make and Python 3.
-
-```sh
-make run
-```
-
-This builds the kernel and user programs, then boots QEMU with 64 MB of RAM.
-User `init` runs `hello` and `cat`, waits for them to finish, and exits to the
-kernel shell. No disk image or root access is needed. 
-
-You can also try `make`, `make run RAM=128M`, `make debug`, `make test`, `make iso`, `make test-iso`, `make version`
-
-ISO builds need GRUB and xorriso, or a running Docker/OrbStack installation.
-Disk tests also need e2fsprogs.
-
-Run `make run USER_SHELL=1` for the userspace shell. Try
-`echo hello | cat`, `cd /etc`, or `cat motd`. Ctrl-C stops the
-foreground pipeline. `exit` returns to the kernel shell.
-
-In the kernel shell, try `help`, `ls`, `cat /etc/motd`, `mem`, `ps` or `uptime`.
-`fetch` and `lsb_release -a` show system information. The version is in [VERSION](VERSION).
+- `i686-elf` GCC and binutils, NASM, QEMU, make and Python 3
+- `make run` (QEMU, 64 MB RAM)
+- `make run USER_SHELL=1` (userspace shell)
+- `make debug` (serial console in the terminal)
+- `make test` (local tests, e2fsprogs for disk tests)
+- `make iso` (GRUB and xorriso, or Docker/OrbStack)
+- `make help` (other commands)
 
 ## Disk and swap
 
-Pass an ext2 image with `make run DISK=disk.img`.
-It mounts at `/mnt/disk`. Add `DISK_RW=1` to allow writes.
-
-`make swap.img` creates a 64 MB swap disk.
-Use it with `make run SWAP=swap.img`.
-
-## What works
-
-- Multiboot/GRUB, VGA and serial consoles 
-- Paging, physical frame tracking, heap allocators and copy-on-write 
-- Ring-3 ELF programs, timer scheduling, `fork`, `execve` and `waitpid` 
-- Userspace heap with `sbrk`, `malloc` and `free`
-- Paths, working directories, shared descriptors, `dup2` and close-on-exec 
-- `init`, `hello` and `cat`, loaded from boot modules under `/bin` 
-- Keyboard and serial input 
-
-User programs have separate address spaces and guarded stacks. Invalid pointers
-and user faults terminate the process. The supported syscall wrappers are in
-[src/userland/user.h](src/userland/user.h).
+- `make run DISK=disk.img` (ext2 at `/mnt/disk`)
+- `DISK_RW=1` (ext2 writes)
+- `make swap.img` (64 MB swap image)
+- `make run SWAP=swap.img` (disk swap)
 
 ## Still to do
 
-- Indexed ext2 directories.
-- Signal handlers and background jobs.
-- SMP and more hardware drivers.
-
-Only the first 1 GB of RAM is managed. Boot-module files are read-only.
+- Signal handlers and background jobs
+- SMP and more hardware drivers
 
 ## Screenshots
-
-Memory, processes and uptime:
 
 ![kmOS shell running mem, ps and uptime](media/shell.png)
 
