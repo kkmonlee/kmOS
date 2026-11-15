@@ -196,8 +196,9 @@ void call_chdir() {
   int result = vmm.user_string(process->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
   if (bad_pointer(result != -14)) return;
   if (result) { arch.setRet(result); return; }
-  File *file = fsm.path(path);
-  arch.setRet(!file ? (u32)-2 : (process->setCurrentDir(file) ? 0 : (u32)-20));
+  int error;
+  File *file = fsm.path(path, &error);
+  arch.setRet(!file ? error : (process->setCurrentDir(file) ? 0 : -20));
 }
 
 struct ExecArguments {

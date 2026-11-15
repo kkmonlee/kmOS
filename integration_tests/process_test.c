@@ -55,6 +55,13 @@ static void descriptors(void) {
     CHECK(open("/etc/motd", 8) == -22);
     CHECK(open("/etc/motd", 1) == -30);
     CHECK(open("/missing", 0) == -2);
+    CHECK(open("/etc/motd/", 0) == -20);
+    CHECK(open("/etc/motd/child", O_CREAT | O_WRONLY, 0644) == -20);
+    CHECK(chdir("/etc/motd/.") == -20);
+    CHECK(execve("/bin/hello/child", 0, 0) == -20);
+    CHECK(mkdir("/etc/motd/child", 0755) == -20);
+    CHECK(unlink("/etc/motd/") == -20 && unlink("/etc/motd/child") == -20);
+    CHECK(rmdir("/etc/motd/child") == -20);
     CHECK(open("/", 0) == -21 && open("/etc", 2) == -21);
     int files[32], count = 0, fd;
     while ((fd = open("/etc/motd", 0)) >= 0) files[count++] = fd;

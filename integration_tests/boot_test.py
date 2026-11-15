@@ -159,6 +159,16 @@ def boot(args, ram, machine="pc"):
             time.sleep(0.04)
         text = vm.wait(lambda text: text.count("kmOS:/$ ") > count)
         assert "\nkeyboardok\n" in text, text
+        if ram == 64 and machine == "pc":
+            start = len(text)
+            vm.send_serial(b"echo ")
+            vm.wait(lambda text: "echo " in text[start:])
+            for key in ("caps_lock", "1", "a", "shift-a", "caps_lock"):
+                vm.monitor(f"sendkey {key} 20")
+                time.sleep(0.04)
+            vm.send_serial(b"\n")
+            text = vm.wait(lambda text: "kmOS:/$ " in text[start:])[start:]
+            assert "\n1Aa\n" in text, text
         for command in ("fetch", "lsb_release -a"):
             start = len(vm.text())
             info = vm.serial_command(command)[start:]
@@ -1033,6 +1043,8 @@ section .note.GNU-stack noalloc noexec nowrite progbits
         assert "[PANIC]" not in text and "Frame leak" not in text, text
         assert "\nsurvived\n" in vm.serial_command("echo survived"), vm.text()
     print("PASS successive user programs after rejection and faults", flush=True)
+    orphan = build_user_test(args, temp, "boot_cleanup_test.c", "init")
+    user(args, orphan, "boot-cleanup")
 
 
 def fault(args, case, vector, error, address=None, ram=64):

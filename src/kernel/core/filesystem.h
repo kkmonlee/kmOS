@@ -18,7 +18,7 @@ public:
   void init();
   void mknod(const char *module, const char *name, u32 flag);
 
-  File *path(const char *p);
+  File *path(const char *p, int *error = nullptr);
   int open(const char *path, u32 flags, u32 mode, File *&file);
   int unlink(const char *path);
   int mkdir(const char *path, u32 mode);
@@ -37,7 +37,7 @@ public:
   File *getRoot();
 
 private:
-  File *resolve(const char *p, char *fname, u32 size, bool trailing = false);
+  File *resolve(const char *p, char *fname, u32 size, bool trailing, int *error);
 
   struct MountInfo {
     char path[128];

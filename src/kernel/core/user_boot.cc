@@ -49,13 +49,19 @@ static void start_user_program(const multiboot_module &module, const char *name)
     serial::write("[USER] Exit status=");
     serial::hex(process->getExitStatus());
     serial::write("\n");
-    set_console_owner(nullptr);
-    arch.destroy_process(process);
-    while (arch.process_count() > processes) {
+    u32 boot_pid = process->getPid();
+    {
+        IRQGuard guard;
+        set_console_owner(nullptr);
+        arch.destroy_process(process);
+        Process *child = arch.plist;
+        if (child) do {
+            if (child->getPid() > boot_pid && child->isUser()) child->sendSignal(SIGKILL);
+            child = child->getPNext();
+        } while (child && child != arch.plist);
         arch.destroy_all_zombie();
-        if (arch.process_count() > processes) asm volatile("hlt" ::: "memory");
     }
-    if (vmm.frames_used == frames) {
+    if (vmm.frames_used == frames && arch.process_count() == processes) {
         serial::write("[USER] Reaped ");
         serial::write(name);
         serial::write("\n");

@@ -60,23 +60,23 @@ File *Filesystem::getRoot()
   return root;
 }
 
-File *Filesystem::path(const char *p)
+File *Filesystem::path(const char *p, int *error)
 {
-  return resolve(p, nullptr, 0);
+  return resolve(p, nullptr, 0, false, error);
 }
 
 int Filesystem::open(const char *name, u32 flags, u32 mode, File *&file) {
   IRQGuard guard;
-  file = path(name);
+  int error;
+  file = path(name, &error);
   if (file) {
     if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) return -17;
     return file->getType() == TYPE_FILE || file->getType() == TYPE_DEVICE ? 0 : -21;
   }
-  if (!(flags & O_CREAT)) return -2;
+  if (error != -2 || !(flags & O_CREAT)) return error;
   char leaf[File::kMaxNameLength + 1];
-  File *parent = path_parent(name, leaf, sizeof(leaf));
-  if (!parent) return -2;
-  if (parent->getType() != TYPE_DIRECTORY) return -20;
+  File *parent = resolve(name, leaf, sizeof(leaf), false, &error);
+  if (!parent) return error;
   int result = parent->createFile(leaf, mode, file);
   return result ? result : 1;
 }
@@ -84,19 +84,20 @@ int Filesystem::open(const char *name, u32 flags, u32 mode, File *&file) {
 int Filesystem::unlink(const char *path) {
   IRQGuard guard;
   char leaf[File::kMaxNameLength + 1];
-  File *parent = path_parent(path, leaf, sizeof(leaf));
-  if (!parent) return -2;
-  if (parent->getType() != TYPE_DIRECTORY) return -20;
+  int error;
+  File *parent = resolve(path, leaf, sizeof(leaf), false, &error);
+  if (!parent) return error;
   return parent->unlinkFile(leaf);
 }
 
 int Filesystem::mkdir(const char *path, u32 mode) {
   IRQGuard guard;
-  if (this->path(path)) return -17;
+  int error;
+  if (this->path(path, &error)) return -17;
+  if (error != -2) return error;
   char leaf[File::kMaxNameLength + 1];
-  File *parent = path_parent(path, leaf, sizeof(leaf), true);
-  if (!parent) return -2;
-  if (parent->getType() != TYPE_DIRECTORY) return -20;
+  File *parent = resolve(path, leaf, sizeof(leaf), true, &error);
+  if (!parent) return error;
   return parent->makeDirectory(leaf, mode);
 }
 
@@ -111,8 +112,9 @@ int Filesystem::rmdir(const char *path) {
   if ((length - start == 1 && path[start] == '.') ||
       (length - start == 2 && path[start] == '.' && path[start + 1] == '.')) return -22;
   char leaf[File::kMaxNameLength + 1];
-  File *parent = path_parent(path, leaf, sizeof(leaf), true);
-  if (!parent) return -2;
+  int error;
+  File *parent = resolve(path, leaf, sizeof(leaf), true, &error);
+  if (!parent) return error;
   parent->scan();
   File *target = parent->find(leaf);
   if (!target) return -2;
@@ -123,8 +125,9 @@ int Filesystem::rmdir(const char *path) {
   return parent->removeDirectory(leaf);
 }
 
-File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing)
+File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, int *error)
 {
+  if (error) *error = -2;
   if (fname && size) fname[0] = '\0';
   if (!p || !*p || !root) return nullptr;
 
@@ -144,7 +147,10 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing)
   u32 links = 0;
   while (*p)
   {
-    if (!fp || fp->getType() != TYPE_DIRECTORY) return nullptr;
+    if (fp->getType() != TYPE_DIRECTORY) {
+      if (error) *error = -20;
+      return nullptr;
+    }
     while (*p == '/') ++p;
     if (!*p) break;
 
@@ -159,11 +165,12 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing)
 
     const char *remaining = p;
     while (*remaining == '/') ++remaining;
-    if (fname && !*remaining)
+    if (fname && !*remaining && (!*p || trailing))
     {
-      if ((*p && !trailing) || count + 1 > size || !strcmp(name, ".") || !strcmp(name, ".."))
+      if (count + 1 > size || !strcmp(name, ".") || !strcmp(name, ".."))
         return nullptr;
       memcpy(fname, name, count + 1);
+      if (error) *error = 0;
       return fp;
     }
 
@@ -184,7 +191,9 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing)
     }
   }
 
-  return fname ? nullptr : fp;
+  if (fname) return nullptr;
+  if (error) *error = 0;
+  return fp;
 }
 
 bool Filesystem::get_path(File *file, char *buffer, u32 size)
@@ -239,7 +248,7 @@ File *Filesystem::pivot_root(File *targetdir)
 File *Filesystem::path_parent(const char *p, char *fname, u32 size, bool trailing)
 {
   if (!fname || !size) return nullptr;
-  return resolve(p, fname, size, trailing);
+  return resolve(p, fname, size, trailing, nullptr);
 }
 
 u32 Filesystem::link(const char *fname, const char *newf)

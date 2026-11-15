@@ -357,8 +357,9 @@ u32 Process::getWaitStatus() {
 }
 
 int Process::exec(const char *path, int argc, const char *const *argv, int envc, const char *const *envp) {
-  File *file = fsm.path(path);
-  if (!file) return -2;
+  int error;
+  File *file = fsm.path(path, &error);
+  if (!file) return error;
   if (file->getType() != TYPE_FILE) return -13;
   u32 size = file->getSize();
   if (!size || size > 16 * 1024 * 1024) return -8;
@@ -368,7 +369,7 @@ int Process::exec(const char *path, int argc, const char *const *argv, int envc,
   u32 count = file->read(0, (u8 *)image, size);
   file->close();
   process_st replacement = {};
-  int error = -5;
+  error = -5;
   bool loaded = count == size && load_elf(image, size, &replacement, argc, argv, envc, envp, &error);
   kfree(image);
   if (!loaded) return error;

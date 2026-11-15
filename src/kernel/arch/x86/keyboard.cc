@@ -90,7 +90,11 @@ void Keyboard::handle_interrupt() {
     update_key_state(key, !key_released);
     
     if (!key_released) {
-        char c = scancode_to_ascii(key, state.shift_pressed || state.caps_lock);
+        char c = scancode_to_ascii(key, state.shift_pressed);
+        if (state.caps_lock) {
+            if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+            else if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+        }
         if (state.ctrl_pressed && (c == 'c' || c == 'C')) c = 3;
         if (state.ctrl_pressed && (c == 'd' || c == 'D')) c = 4;
         if (state.ctrl_pressed && (c == 'z' || c == 'Z')) c = 26;
