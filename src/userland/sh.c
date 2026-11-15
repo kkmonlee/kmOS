@@ -1,11 +1,25 @@
 #include "user.h"
 
-enum { max_commands = 8, max_args = 32, line_size = 512 };
+enum { max_commands = 8, max_args = 32, line_size = 512, max_jobs = 16 };
 
 typedef struct {
     int argc;
     char *argv[max_args + 1];
 } Command;
+
+typedef struct {
+    int group;
+    int count;
+    int pids[max_commands];
+    u32 stopped;
+    u32 order;
+    char line[line_size];
+} Job;
+
+static Job jobs[max_jobs];
+static u32 job_order;
+static volatile int reading_command;
+static volatile int child_changed;
 
 static int equal(const char *left, const char *right) {
     while (*left && *left == *right) { ++left; ++right; }
@@ -19,6 +33,58 @@ static u32 length(const char *text) {
 }
 
 static void error(const char *text) { write_all(2, text, length(text)); }
+
+static void print_number(unsigned int value) {
+    char digits[10];
+    int count = 0;
+    do {
+        digits[count++] = '0' + value % 10;
+        value /= 10;
+    } while (value);
+    while (count) write_all(1, &digits[--count], 1);
+}
+
+enum job_state { JOB_DONE, JOB_RUNNING, JOB_STOPPED };
+
+static enum job_state job_state(const Job *job) {
+    int stopped = 0;
+    for (int i = 0; i < job->count; ++i) {
+        if (!job->pids[i]) continue;
+        if (!(job->stopped & (1U << i))) return JOB_RUNNING;
+        stopped = 1;
+    }
+    return stopped ? JOB_STOPPED : JOB_DONE;
+}
+
+static void record_wait(Job *job, int index, int status) {
+    u32 bit = 1U << index;
+    if (WIFSTOPPED(status)) {
+        job->stopped |= bit;
+    } else {
+        job->stopped &= ~bit;
+        if (!WIFCONTINUED(status)) job->pids[index] = 0;
+    }
+}
+
+static void reap_jobs(void) {
+    for (int i = 0; i < max_jobs; ++i) {
+        Job *job = &jobs[i];
+        if (!job->group) continue;
+        for (int j = 0; j < job->count; ++j) {
+            if (!job->pids[j]) continue;
+            int status = 0;
+            int result = waitpid(job->pids[j], &status, WNOHANG | WUNTRACED | WCONTINUED);
+            if (result == job->pids[j] || result == -10) record_wait(job, j, status);
+        }
+        if (job_state(job) == JOB_DONE) job->group = 0;
+    }
+}
+
+static void child_exit(int signal) {
+    (void)signal;
+    if (reading_command) reap_jobs();
+    else child_changed = 1;
+}
 
 static int input(char *line) {
     u32 used = 0;
@@ -42,19 +108,19 @@ static int input(char *line) {
     }
 }
 
-static int parse(char *line, Command *commands) {
+static int parse(char *line, Command *commands, int *background) {
     char *out = line;
     int index = 0;
     for (;;) {
         while (*line == ' ' || *line == '\t') ++line;
         if (!*line) break;
         Command *command = &commands[index];
-        if (*line == '|' || command->argc == max_args) return -1;
+        if (*line == '|' || *line == '&' || command->argc == max_args) return -1;
         command->argv[command->argc++] = out;
         char quote = 0;
         while (*line) {
             char c = *line;
-            if (!quote && (c == ' ' || c == '\t' || c == '|')) break;
+            if (!quote && (c == ' ' || c == '\t' || c == '|' || c == '&')) break;
             ++line;
             if (c == quote) quote = 0;
             else if (!quote && (c == '\'' || c == '"')) quote = c;
@@ -70,14 +136,18 @@ static int parse(char *line, Command *commands) {
         if (delimiter) ++line;
         *out++ = 0;
         command->argv[command->argc] = 0;
-        if (delimiter == '|') {
-            if (++index == max_commands) return -1;
-        }
         if (!delimiter) break;
         while (*line == ' ' || *line == '\t') ++line;
-        if (delimiter != '|' && *line == '|') {
-            ++line;
+        if ((delimiter == ' ' || delimiter == '\t') && (*line == '|' || *line == '&')) {
+            delimiter = *line++;
+        }
+        if (delimiter == '|') {
             if (++index == max_commands) return -1;
+        } else if (delimiter == '&') {
+            while (*line == ' ' || *line == '\t') ++line;
+            if (*line) return -1;
+            *background = 1;
+            break;
         }
     }
     if (!commands[index].argc) return index ? -1 : 0;
@@ -118,47 +188,64 @@ static void run_command(const Command *command) {
     exit(127);
 }
 
-static void run_pipeline(Command *commands, int count, int foreground) {
+static void collect_job(Job *job) {
+    for (int i = 0; i < job->count; ++i) {
+        int pid = job->pids[i];
+        if (!pid) continue;
+        while (waitpid(pid, 0, 0) == -4) {}
+    }
+    job->group = 0;
+}
+
+static int start_pipeline(Command *commands, int count, int terminal, int background, Job *job) {
     int pipes[max_commands - 1][2];
     for (int i = 0; i + 1 < count; ++i) {
         if (pipe(pipes[i]) < 0) {
             close_pipes(pipes, i);
-            error("sh: pipe failed\n");
-            return;
+            return -1;
         }
     }
 
-    int group = 0, started = 0, pids[max_commands];
+    int gate[2];
+    if (pipe(gate) < 0) {
+        close_pipes(pipes, count - 1);
+        return -1;
+    }
+    job->count = 0;
+    job->stopped = 0;
+    int failed = 0;
     for (int i = 0; i < count; ++i) {
         int pid = fork();
         if (pid < 0) {
-            error("sh: fork failed\n");
+            failed = 1;
             break;
         }
         if (!pid) {
-            if ((foreground && setpgid(0, group) < 0) ||
-                (i && dup2(pipes[i - 1][0], 0) < 0) ||
+            close(gate[1]);
+            if ((i && dup2(pipes[i - 1][0], 0) < 0) ||
                 (i + 1 < count && dup2(pipes[i][1], 1) < 0)) exit(1);
             close_pipes(pipes, count - 1);
+            char value;
+            if (read(gate[0], &value, 1) != 0 || close(gate[0])) exit(1);
             run_command(&commands[i]);
         }
-        pids[started++] = pid;
-        if (foreground) {
-            if (!group) group = pid;
-            setpgid(pid, group);
+        if (!job->count) job->group = pid;
+        job->pids[job->count++] = pid;
+        if (terminal && setpgid(pid, job->group) < 0) {
+            failed = 1;
+            break;
         }
     }
 
     close_pipes(pipes, count - 1);
-    if (started < count) for (int i = 0; i < started; ++i) kill(pids[i], 15);
-    if (group) set_foreground(group);
-    int interrupted = 0;
-    for (int i = 0; i < started; ++i) {
-        int status;
-        if (waitpid(pids[i], &status, 0) == pids[i] && status == 2) interrupted = 1;
+    close(gate[0]);
+    if (!failed && terminal && !background && set_foreground(job->group) < 0) failed = 1;
+    if (failed) {
+        for (int i = 0; i < job->count; ++i) kill(job->pids[i], SIGKILL);
     }
-    if (group) set_foreground(0);
-    if (interrupted) puts("^C\n");
+    close(gate[1]);
+    if (failed) collect_job(job);
+    return failed ? -1 : 0;
 }
 
 static int decimal(const char *text) {
@@ -172,31 +259,158 @@ static int decimal(const char *text) {
     return value;
 }
 
+static void print_job_id(int index) {
+    puts("[");
+    print_number(index + 1);
+    puts("] ");
+}
+
+static void print_job(Job *job) {
+    print_job_id(job - jobs);
+    puts(job_state(job) == JOB_STOPPED ? "Stopped  " : "Running  ");
+    puts(job->line);
+    puts("\n");
+}
+
+static void list_jobs(void) {
+    for (int i = 0; i < max_jobs; ++i) {
+        if (jobs[i].group) print_job(&jobs[i]);
+    }
+}
+
+static void wait_foreground(Job *job, int terminal) {
+    int interrupted = 0;
+    int selector = terminal ? -job->group : -1;
+    int options = terminal ? WUNTRACED | WCONTINUED : 0;
+    while (job_state(job) == JOB_RUNNING) {
+        int status, pid = waitpid(selector, &status, options);
+        if (pid == -4) continue;
+        if (pid < 0) break;
+        if (status == SIGINT) interrupted = 1;
+        for (int i = 0; i < job->count; ++i) {
+            if (job->pids[i] == pid) {
+                record_wait(job, i, status);
+                break;
+            }
+        }
+    }
+    if (terminal) set_foreground(0);
+    if (terminal && interrupted) puts("^C\n");
+    if (terminal && job_state(job) == JOB_STOPPED) print_job(job);
+    else job->group = 0;
+}
+
+static void resume_job(Command *command, int foreground) {
+    Job *job = 0;
+    if (command->argc == 1) {
+        for (int i = 0; i < max_jobs; ++i) {
+            if (jobs[i].group && (!job || job_order - jobs[i].order < job_order - job->order)) job = &jobs[i];
+        }
+    } else if (command->argc == 2) {
+        const char *id = command->argv[1];
+        int number = decimal(id + (*id == '%'));
+        if (number > 0 && number <= max_jobs && jobs[number - 1].group) job = &jobs[number - 1];
+    }
+    if (!job || (foreground && set_foreground(job->group) < 0)) {
+        error("sh: no such job\n");
+        return;
+    }
+    if (job->stopped) {
+        if (kill(-job->group, SIGCONT) < 0) {
+            if (foreground) set_foreground(0);
+            error("sh: no such job\n");
+            return;
+        }
+        job->stopped = 0;
+    }
+    job->order = ++job_order;
+    if (foreground) wait_foreground(job, 1);
+    else print_job(job);
+}
+
+static void run_job(Command *commands, int count, const char *line, int terminal, int background) {
+    Job local = {0};
+    Job *job = &local;
+    if (terminal) {
+        int index = 0;
+        while (index < max_jobs && jobs[index].group) ++index;
+        if (index == max_jobs) {
+            error("sh: too many jobs\n");
+            return;
+        }
+        job = &jobs[index];
+    }
+    if (start_pipeline(commands, count, terminal, background, job)) {
+        error("sh: cannot start pipeline\n");
+        return;
+    }
+    job->order = ++job_order;
+    for (int i = 0; (job->line[i] = line[i]); ++i) {}
+    if (background) {
+        print_job_id(job - jobs);
+        print_number(job->group);
+        puts("\n");
+    } else {
+        wait_foreground(job, terminal);
+    }
+}
+
+static void close_jobs(void) {
+    for (int i = 0; i < max_jobs; ++i)
+        if (jobs[i].group) kill(-jobs[i].group, SIGKILL);
+    for (int i = 0; i < max_jobs; ++i)
+        if (jobs[i].group) collect_job(&jobs[i]);
+}
+
 int main(void) {
     char line[line_size];
-    int foreground = set_foreground(0) == 0;
+    int terminal = set_foreground(0) == 0;
+    struct sigaction action = {child_exit, 0, SA_RESTART};
+    int job_control = terminal && sigaction(SIGCHLD, &action, 0) == 0;
     for (;;) {
+        do {
+            reading_command = 0;
+            child_changed = 0;
+            reap_jobs();
+            reading_command = 1;
+        } while (child_changed);
         puts("sh$ ");
         int read_line = input(line);
-        if (read_line < 0) { puts("\n"); return 0; }
+        reading_command = 0;
+        if (read_line < 0) { puts("\n"); break; }
         if (!read_line) continue;
+        char arguments[line_size];
+        for (int i = 0; (arguments[i] = line[i]); ++i) {}
         Command commands[max_commands] = {0};
-        int count = parse(line, commands);
+        int background = 0;
+        int count = parse(arguments, commands, &background);
         if (count < 0) { error("sh: syntax error\n"); continue; }
         if (!count) continue;
         Command *command = &commands[0];
         const char *name = command->argv[0];
-        if (count == 1 && equal(name, "exit")) return 0;
-        if (count == 1 && equal(name, "cd")) {
+        if (background) {
+            if (job_control) run_job(commands, count, line, 1, 1);
+            else error("sh: job control unavailable\n");
+        } else if (count == 1 && equal(name, "exit")) {
+            break;
+        } else if (count == 1 && equal(name, "cd")) {
             if (command->argc > 2 || chdir(command->argc == 2 ? command->argv[1] : "/"))
                 error("sh: cd failed\n");
         } else if (count == 1 && equal(name, "kill")) {
             int pid = command->argc == 2 ? decimal(command->argv[1]) : -1;
             if (pid <= 0 || kill(pid, 15)) error("sh: kill failed\n");
         } else if (count == 1 && equal(name, "help")) {
-            puts("cd [dir], echo [text], kill pid, exit\n");
+            puts("cd [dir], echo [text], kill pid, jobs, fg [%job], bg [%job], exit\n");
+        } else if (count == 1 && equal(name, "jobs")) {
+            reap_jobs();
+            list_jobs();
+        } else if (count == 1 && (equal(name, "fg") || equal(name, "bg"))) {
+            reap_jobs();
+            resume_job(command, equal(name, "fg"));
         } else {
-            run_pipeline(commands, count, foreground);
+            run_job(commands, count, line, terminal, 0);
         }
     }
+    close_jobs();
+    return 0;
 }

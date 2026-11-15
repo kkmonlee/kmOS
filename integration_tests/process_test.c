@@ -98,8 +98,8 @@ static void isolation(void) {
 static void children(void) {
     int status = 777;
     CHECK(waitpid(-1, &status, 0) == -10 && status == 777);
-    CHECK(waitpid(0, &status, 0) == -22);
-    CHECK(waitpid(-1, &status, 2) == -22);
+    CHECK(waitpid(0, &status, 0) == -10 && status == 777);
+    CHECK(waitpid(-1, &status, 4) == -22);
     int first = fork();
     CHECK(first >= 0);
     if (!first) { for (volatile int i = 0; i < 50000000; ++i) {} exit(10); }
@@ -115,7 +115,7 @@ static void children(void) {
     second = fork();
     CHECK(second >= 0);
     if (!second) exit(13);
-    int result = waitpid(-1, &status, 0);
+    int result = waitpid(0, &status, 0);
     CHECK(result == first || result == second);
     CHECK(status == ((result == first ? 12 : 13) << 8));
     expect(result == first ? second : first, (result == first ? 13 : 12) << 8);

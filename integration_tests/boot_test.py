@@ -343,10 +343,12 @@ def user_shell(args, temp):
         text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
         assert "pipe and signal semantics verified" in text and "[USER] Exit status=00000000" in text, text
         assert "[USER] Reaped init" in text and "[PANIC]" not in text and "Frame leak" not in text, text
-    print("PASS blocking pipes, descriptor rollback, SIGPIPE and process-group signals", flush=True)
+    print("PASS blocking pipes, process-group signals and wait events", flush=True)
 
     userland = Path(__file__).resolve().parents[1] / "src/userland"
-    modules = ",".join(str(userland / (name + ".elf")) for name in ("init", "hello", "cat", "sh"))
+    fixture = build_user_test(args, temp, "job_test.c", "job-test")
+    programs = [userland / f"{name}.elf" for name in ("init", "hello", "cat", "sh")]
+    modules = ",".join(map(str, [*programs, fixture]))
     with VM(args, "user-shell", append="user usershell", module=modules) as vm:
         vm.wait(lambda text: "sh$ " in text)
         for command, output in (
@@ -366,10 +368,75 @@ def user_shell(args, temp):
         vm.wait(lambda text: "\nforeground\n" in text[start:])
         vm.send_serial(b"\x03")
         vm.wait(lambda text: "^C\nsh$ " in text[start:])
+
+        def shell_command(command):
+            start = len(vm.text())
+            vm.send_serial((command + "\n").encode())
+            return vm.wait(lambda text: "sh$ " in text[start:])[start:]
+
+        assert "\na&b\n" in shell_command("echo 'a&b' | cat")
+        assert "sh: syntax error" in shell_command("echo x & echo y")
+        start = len(vm.text())
+        vm.send_serial(b"cat|cat\nbefore-stop\n")
+        vm.wait(lambda text: "\nbefore-stop\n" in text[start:])
+        vm.monitor("sendkey ctrl-z 100")
+        vm.wait(lambda text: "[1] Stopped  cat|cat\nsh$ " in text[start:])
+        assert re.search(r"\[2\] \d+\n", shell_command("cat &"))
+
+        def wait_for_jobs(*expected):
+            for _ in range(20):
+                text = shell_command("jobs")
+                if all(job in text for job in expected):
+                    return text
+                time.sleep(0.01)
+            raise AssertionError(text)
+
+        wait_for_jobs("[1] Stopped  cat|cat\n", "[2] Stopped  cat &\n")
+        assert "[1] Running  cat|cat\n" in shell_command("bg %1")
+        wait_for_jobs("[1] Stopped  cat|cat\n", "[2] Stopped  cat &\n")
+        start = len(vm.text())
+        vm.send_serial(b"\x03")
+        vm.wait(lambda text: "^C\nsh$ " in text[start:])
+        assert "[1] Stopped" in shell_command("jobs")
+
+        start = len(vm.text())
+        vm.send_serial(b"fg %1\nfrom-first-job\n")
+        vm.wait(lambda text: "\nfrom-first-job\n" in text[start:])
+        vm.send_serial(b"\x03")
+        vm.wait(lambda text: "^C\nsh$ " in text[start:])
+        text = shell_command("jobs")
+        assert "[2] Stopped" in text and "[1]" not in text, text
+
+        start = len(vm.text())
+        vm.send_serial(b"fg\nfrom-second-job\n")
+        vm.wait(lambda text: "\nfrom-second-job\n" in text[start:])
+        vm.send_serial(b"\x1a")
+        vm.wait(lambda text: "[2] Stopped  cat &\nsh$ " in text[start:])
+        start = len(vm.text())
+        vm.send_serial(b"fg\nsecond-job-resumed\n")
+        vm.wait(lambda text: "\nsecond-job-resumed\n" in text[start:])
+        vm.send_serial(b"\x04")
+        vm.wait(lambda text: "sh$ " in text[start:])
+        assert "[" not in shell_command("jobs")
+
+        assert "[1] Stopped  job-test\n" in shell_command("job-test")
+        start = len(vm.text())
+        shell_command("bg")
+        vm.wait(lambda text: "continued in background\n" in text[start:])
+
+        start = len(vm.text())
+        shell_command("echo background-output | cat &")
+        vm.wait(lambda text: "background-output\n" in text[start:])
+        for _ in range(10):
+            if "[" not in shell_command("jobs"):
+                break
+        else:
+            raise AssertionError("completed background pipeline still listed")
+        assert re.search(r"\[1\] \d+\n", shell_command("cat &"))
         vm.send_serial(b"exit\n")
         text = vm.wait(lambda text: "kmOS:/$ " in text)
         assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
-    print("PASS interactive userspace shell, pipelines and Ctrl-C", flush=True)
+    print("PASS interactive shell, pipelines, Ctrl-C, Ctrl-Z and job control", flush=True)
 
 
 def user_heap(args, temp):

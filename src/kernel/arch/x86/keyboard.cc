@@ -93,6 +93,7 @@ void Keyboard::handle_interrupt() {
         char c = scancode_to_ascii(key, state.shift_pressed || state.caps_lock);
         if (state.ctrl_pressed && (c == 'c' || c == 'C')) c = 3;
         if (state.ctrl_pressed && (c == 'd' || c == 'D')) c = 4;
+        if (state.ctrl_pressed && (c == 'z' || c == 'Z')) c = 26;
         if (c != 0) {
             add_to_buffer(c);
         }

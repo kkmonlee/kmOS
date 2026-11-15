@@ -34,6 +34,7 @@ public:
         if (!owner_ || arch.pcurrent != owner_) return -1;
         if (group > 0x7fffffffU) return -22;
         foreground_ = group;
+        if (count_) Process::wakeFile(this, input_group());
         return 0;
     }
 
@@ -44,20 +45,26 @@ public:
             if (io.inb(0x3fd) & 1) value = io.inb(0x3f8);
             else if (keyboard_available()) value = keyboard_getchar();
             else break;
-            if (value == 3 && foreground_) {
+            if ((value == 3 || value == 26) && foreground_) {
                 first_ = count_ = 0;
-                signal_processes(-static_cast<s32>(foreground_), SIGINT);
+                signal_processes(-static_cast<s32>(foreground_), value == 3 ? SIGINT : SIGTSTP);
             } else if (count_ < sizeof(input_)) {
                 input_[(first_ + count_) % sizeof(input_)] = value;
                 ++count_;
             }
         }
-        if (count_) Process::wakeFile(this);
+        if (count_) Process::wakeFile(this, input_group());
     }
 
     bool waitable() const override { return true; }
 
     u32 read(u32, u8 *buffer, u32 count) override {
+        Process *process = arch.pcurrent;
+        if (owner_ && process->getGroup() != input_group()) {
+            if (!process->receivesSignal(SIGTTIN)) return (u32)-5;
+            signal_processes(-static_cast<s32>(process->getGroup()), SIGTTIN);
+            return process->getState() == STOPPED ? (u32)-11 : (u32)-4;
+        }
         if (!count_) return (u32)-11;
         if (count > count_) count = count_;
         u32 copied = 0;
@@ -78,6 +85,8 @@ public:
     }
 
 private:
+    u32 input_group() const { return foreground_ ? foreground_ : owner_->getGroup(); }
+
     Process *owner_ = nullptr;
     u32 foreground_ = 0;
     u32 first_ = 0;

@@ -605,8 +605,9 @@ InterruptFrame *Architecture::suspend_process(InterruptFrame *frame) {
 InterruptFrame *Architecture::return_to_user(InterruptFrame *frame) {
     while ((frame->cs & 3) == 3 && pcurrent) {
         int signal = pcurrent->deliverSignal(*frame);
-        if (!signal) break;
-        frame = finish_process(128 + signal, signal);
+        if (signal) frame = finish_process(128 + signal, signal);
+        else if (pcurrent->getState() == STOPPED) frame = suspend_process(frame);
+        else break;
     }
     return frame;
 }

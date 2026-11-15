@@ -56,10 +56,37 @@ static int signals(void) {
     return 0;
 }
 
+static int job_signals(void) {
+    int ends[2];
+    if (pipe(ends)) return 19;
+    int child = fork();
+    if (child < 0) return 20;
+    if (!child) {
+        char value;
+        read(ends[0], &value, 1);
+        return 21;
+    }
+    struct sigaction action = {SIG_IGN, 0, 0};
+    int status;
+    if (sigaction(SIGSTOP, &action, 0) != -22 || setpgid(child, child) ||
+        kill(-child, SIGSTOP) || waitpid(0, &status, WNOHANG) != -10 ||
+        waitpid(-child, &status, WNOHANG) || waitpid(-child, &status, WUNTRACED) != child ||
+        !WIFSTOPPED(status) || WSTOPSIG(status) != SIGSTOP) return 22;
+    if (kill(child, SIGSTOP) || waitpid(child, &status, WUNTRACED | WNOHANG) ||
+        kill(child, SIGCONT) || waitpid(-child, &status, WCONTINUED) != child ||
+        !WIFCONTINUED(status) || waitpid(child, &status, WCONTINUED | WNOHANG)) return 23;
+    if (kill(child, SIGTSTP) || waitpid(-child, &status, WUNTRACED) != child ||
+        !WIFSTOPPED(status) || WSTOPSIG(status) != SIGTSTP ||
+        kill(child, SIGKILL) || waitpid(child, &status, 0) != child || status != SIGKILL) return 24;
+    return close(ends[0]) || close(ends[1]);
+}
+
 int main(void) {
     int result = transfers();
     if (result) return result;
     result = signals();
+    if (result) return result;
+    result = job_signals();
     if (result) return result;
     for (int i = 3; i < 31; ++i) if (open("/etc/motd", 0) != i) return 17;
     int ends[2] = {-1, -1};

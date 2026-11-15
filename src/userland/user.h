@@ -3,6 +3,7 @@
 
 #include "../sdk/include/fcntl.h"
 #include "../sdk/include/signal.h"
+#include "../sdk/include/sys/wait.h"
 
 typedef unsigned int u32;
 

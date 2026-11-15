@@ -368,6 +368,7 @@ int Shell::cmd_ps(int argc, char** argv) {
             switch (state) {
                 case READY: state_str = "READY"; break;
                 case SLEEPING: state_str = "SLEEPING"; break;
+                case STOPPED: state_str = "STOPPED"; break;
                 case ZOMBIE: state_str = "ZOMBIE"; break;
                 default: state_str = "INVALID"; break;
             }

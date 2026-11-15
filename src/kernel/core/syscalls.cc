@@ -55,6 +55,6 @@ extern "C" InterruptFrame *isr_syscall(InterruptFrame *frame)
   if (!syscall.call(frame->eax)) frame->eax = (u32)-38;
   process->getPInfo()->syscall_frame = 0;
   if (process->getState() == ZOMBIE) frame = arch.finish_process(process->getExitStatus());
-  else if (process->getState() == SLEEPING) frame = arch.suspend_process(frame);
+  else if (process->getState() == SLEEPING || process->getState() == STOPPED) frame = arch.suspend_process(frame);
   return arch.return_to_user(frame);
 }

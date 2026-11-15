@@ -7,6 +7,7 @@
 #include <api/kernel/syscall_table.h>
 #include <filesystem.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 
 extern "C" {
   int strlen(const char *s);
@@ -35,14 +36,19 @@ struct SignalContext {
 
 static constexpr u32 syscall_instruction_size = 2;
 
+static bool stop_signal(int sig) {
+  return sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN;
+}
+
 static bool supported_signal(int sig) {
-  return sig == SIGINT || sig == SIGKILL || sig == SIGPIPE || sig == SIGTERM || sig == SIGCHLD;
+  return sig == SIGINT || sig == SIGKILL || sig == SIGPIPE || sig == SIGTERM ||
+         sig == SIGCHLD || sig == SIGCONT || stop_signal(sig);
 }
 
 static u32 signal_bit(int sig) { return 1U << (sig - 1); }
 
 static bool ignored_signal(int sig, const struct sigaction &action) {
-  return action.sa_handler == SIG_IGN || (sig == SIGCHLD && action.sa_handler == SIG_DFL);
+  return action.sa_handler == SIG_IGN || ((sig == SIGCHLD || sig == SIGCONT) && action.sa_handler == SIG_DFL);
 }
 
 char *Process::default_tty = const_cast<char*>("/dev/tty");
@@ -178,11 +184,28 @@ void Process::setPParent(Process *p)
 }
 
 bool Process::waitingFor(Process *child) {
-  return waiting && child->pparent == this && (wait_child == -1 || wait_child == (int)child->pid);
+  return waiting && matchesChild(child, wait_child);
+}
+
+bool Process::matchesChild(Process *child, int selector) const {
+  if (child->pparent != this) return false;
+  if (selector > 0) return child->pid == (u32)selector;
+  if (!selector) return child->group == group;
+  return selector == -1 || child->group == 0U - (u32)selector;
+}
+
+bool Process::hasWaitEvent(u32 options) const {
+  return state == ZOMBIE || ((options & WUNTRACED) && WIFSTOPPED(job_status)) ||
+         ((options & WCONTINUED) && WIFCONTINUED(job_status));
+}
+
+void Process::consumeWaitEvent() {
+  if (state == ZOMBIE) collected = true;
+  else job_status = 0;
 }
 
 bool Process::completeWait(Process *child) {
-  if (!waitingFor(child)) return false;
+  if (!waitingFor(child) || !child->hasWaitEvent(wait_options)) return false;
   u32 status = child->getWaitStatus();
   int error = 0;
   if (wait_status && !vmm.copy_to_user(info.pd, wait_status, &status, sizeof(status), &error) &&
@@ -195,7 +218,7 @@ bool Process::completeWait(Process *child) {
   retry_syscall = false;
   waiting = false;
   state = READY;
-  child->collected = !error;
+  if (!error) child->consumeWaitEvent();
   return true;
 }
 
@@ -213,13 +236,13 @@ void Process::childExited(Process *child) {
 }
 
 int Process::wait(int child, u32 status, u32 options) {
-  if ((child != -1 && child <= 0) || (options & ~1U)) return -22;
+  if (options & ~(WNOHANG | WUNTRACED | WCONTINUED)) return -22;
   bool has_child = false;
   Process *cursor = arch.plist;
   if (cursor) do {
-    if (cursor->pparent == this && !cursor->collected && (child == -1 || (int)cursor->pid == child)) {
+    if (matchesChild(cursor, child) && !cursor->collected) {
       has_child = true;
-      if (cursor->state == ZOMBIE) {
+      if (cursor->hasWaitEvent(options)) {
         u32 result = cursor->pid;
         u32 value = cursor->getWaitStatus();
         int error;
@@ -227,15 +250,15 @@ int Process::wait(int child, u32 status, u32 options) {
           if (error == -14) exit(142, 14);
           return error;
         }
-        cursor->collected = true;
-        arch.destroy_process(cursor);
+        cursor->consumeWaitEvent();
+        if (cursor->collected) arch.destroy_process(cursor);
         return result;
       }
     }
     cursor = cursor->pnext;
   } while (cursor && cursor != arch.plist);
   if (!has_child) return -10;
-  if (options & 1) return 0;
+  if (options & WNOHANG) return 0;
   if (status && !vmm.user_write_range(info.pd, status, sizeof(u32))) {
     exit(142, 14);
     return -14;
@@ -243,6 +266,7 @@ int Process::wait(int child, u32 status, u32 options) {
   waiting = true;
   wait_child = child;
   wait_status = status;
+  wait_options = options;
   blockSyscall(SYS_waitpid);
   return 0;
 }
@@ -327,7 +351,10 @@ void Process::exit(int status, int signal)
 }
 
 int Process::getExitStatus() { return exit_status; }
-u32 Process::getWaitStatus() { return exit_signal ? exit_signal & 0x7f : (exit_status & 0xff) << 8; }
+u32 Process::getWaitStatus() {
+  if (state != ZOMBIE) return job_status;
+  return exit_signal ? exit_signal & 0x7f : (exit_status & 0xff) << 8;
+}
 
 int Process::exec(const char *path, int argc, const char *const *argv, int envc, const char *const *envp) {
   File *file = fsm.path(path);
@@ -374,7 +401,7 @@ Process *Process::schedule()
     if (attempts > max_attempts) {
       return this;
     }
-  } while (n != NULL && (n->state == ZOMBIE || n->state == SLEEPING));
+  } while (n != NULL && (n->state == ZOMBIE || n->state == SLEEPING || n->state == STOPPED));
   
   if (n == NULL || n == this) {
     return this;
@@ -516,14 +543,45 @@ bool Process::isUser() const {
   return info.pd && info.pd != kernel_directory && (info.regs.cs & 3) == 3;
 }
 
+void Process::reportJobState(u32 status) {
+  job_status = status;
+  Process *parent = pparent;
+  if (!parent) return;
+  parent->completeWait(this);
+  parent->sendSignal(SIGCHLD);
+}
+
+void Process::stopForSignal(int sig) {
+  if (state == STOPPED) return;
+  waiting = false;
+  waiting_file = nullptr;
+  state = STOPPED;
+  reportJobState((sig << 8) | 0x7f);
+}
+
+bool Process::receivesSignal(int sig) const {
+  return supported_signal(sig) && !(blocked_signals & signal_bit(sig)) &&
+         !ignored_signal(sig, signal_actions[sig].action);
+}
+
 void Process::sendSignal(int sig) {
   if (!supported_signal(sig) || state == ZOMBIE || !isUser()) return;
+  if (sig == SIGCONT) {
+    pending_signals &= ~(signal_bit(SIGSTOP) | signal_bit(SIGTSTP) | signal_bit(SIGTTIN));
+    if (state == STOPPED) {
+      state = READY;
+      reportJobState(0xffff);
+    }
+  } else if (stop_signal(sig)) {
+    pending_signals &= ~signal_bit(SIGCONT);
+  }
   const struct sigaction &action = signal_actions[sig].action;
   if (ignored_signal(sig, action)) return;
   u32 bit = signal_bit(sig);
   if (!(blocked_signals & bit)) {
     if (action.sa_handler == SIG_DFL) {
-      exit(128 + sig, sig);
+      if (stop_signal(sig)) stopForSignal(sig);
+      else exit(128 + sig, sig);
       return;
     }
     if (state == SLEEPING) {
@@ -536,7 +594,7 @@ void Process::sendSignal(int sig) {
 }
 
 int Process::setSignalAction(int sig, u32 address, u32 previous, u32 restorer) {
-  if (!supported_signal(sig) || (address && sig == SIGKILL)) return -22;
+  if (!supported_signal(sig) || (address && (sig == SIGKILL || sig == SIGSTOP))) return -22;
   struct sigaction action;
   int error;
   if (address) {
@@ -565,7 +623,12 @@ int Process::deliverSignal(InterruptFrame &frame) {
     pending_signals &= ~bit;
     const SignalAction &entry = signal_actions[sig];
     if (ignored_signal(sig, entry.action)) continue;
-    if (entry.action.sa_handler == SIG_DFL) return sig;
+    if (entry.action.sa_handler == SIG_DFL) {
+      if (!stop_signal(sig)) return sig;
+      stopForSignal(sig);
+      retry_syscall = retry;
+      break;
+    }
     if (frame.useresp < 32 || !vmm.user_range(info.pd, (u32)entry.action.sa_handler, 1) ||
         !vmm.user_range(info.pd, entry.restorer, 1)) return SIGSEGV;
 
@@ -681,7 +744,7 @@ int Process::setGroup(u32 target_pid, u32 target_group) {
 }
 
 void Process::waitForFile(File *file, u32 syscall) {
-  waiting_file = file;
+  if (state != STOPPED) waiting_file = file;
   blockSyscall(syscall);
 }
 
@@ -690,13 +753,13 @@ void Process::blockSyscall(u32 syscall) {
   frame->eip -= syscall_instruction_size;
   frame->eax = syscall;
   retry_syscall = true;
-  state = SLEEPING;
+  if (state != STOPPED) state = SLEEPING;
 }
 
-void Process::wakeFile(File *file) {
+void Process::wakeFile(File *file, u32 group) {
   Process *process = arch.plist;
   if (process) do {
-    if (process->waiting_file == file) {
+    if (process->waiting_file == file && (!group || process->group == group)) {
       process->waiting_file = nullptr;
       process->state = READY;
     }
