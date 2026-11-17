@@ -97,6 +97,7 @@ static void child_exit(int signal) {
 
 static int input(char *line) {
     u32 used = 0;
+    int too_long = 0;
     for (;;) {
         char c;
         int count = read(0, &c, 1);
@@ -105,12 +106,18 @@ static int input(char *line) {
         if (c == 4 && !used) return -1;
         if (c == '\n' || c == '\r') {
             puts("\n");
+            if (too_long) {
+                error("sh: line too long\n");
+                return 0;
+            }
             line[used] = 0;
             return 1;
         }
+        if (too_long) continue;
         if (c == '\b' || c == 127) {
             if (used) { --used; puts("\b \b"); }
-        } else if ((c >= ' ' || c == '\t') && used + 1 < line_size) {
+        } else if (c >= ' ' || c == '\t') {
+            if (used + 1 == line_size) { too_long = 1; continue; }
             line[used++] = c;
             write_all(1, &c, 1);
         }

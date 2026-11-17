@@ -107,7 +107,9 @@ void Shell::run() {
         
         int len = keyboard.read_line(state.command_buffer, MAX_COMMAND_LENGTH);
         
-        if (len > 0) {
+        if (len < 0) {
+            io.print("Line too long\n");
+        } else if (len > 0) {
             char* args[MAX_ARGS];
             int argc = parse_command(state.command_buffer, args);
             

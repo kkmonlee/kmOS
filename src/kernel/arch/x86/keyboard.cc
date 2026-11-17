@@ -185,32 +185,32 @@ bool Keyboard::key_pressed(u8 scancode) {
 
 int Keyboard::read_line(char* buffer, int max_len) {
     int pos = 0;
-    char c;
-    
-    while (pos < max_len - 1) {
+    bool too_long = false;
+
+    for (;;) {
         while (!char_available()) {
             asm volatile("hlt");
         }
-        c = get_char();
-        
+        char c = get_char();
+
         if (c == '\n' || c == '\r') {
             buffer[pos] = '\0';
             io.print("\n");
-            return pos;
-        } else if (c == '\b' || c == 127) {
+            return too_long ? -1 : pos;
+        }
+        if (too_long) continue;
+        if (c == '\b' || c == 127) {
             if (pos > 0) {
                 pos--;
                 io.print("\b \b");
             }
         } else if (c >= 32 && c < 127) {
+            if (pos + 1 == max_len) { too_long = true; continue; }
             buffer[pos] = c;
             io.print("%c", c);
             pos++;
         }
     }
-    
-    buffer[pos] = '\0';
-    return pos;
 }
 
 void Keyboard::clear_buffer() {

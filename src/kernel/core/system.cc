@@ -56,7 +56,8 @@ int System::login(User *us, char *pass)
       return RETURN_FAILURE;
   }
 
-  uservar->write(0, (u8 *)us->getName(), strlen(us->getName()));
+  int result = uservar->setValue(us->getName());
+  if (result) return result;
   actual = us;
   return RETURN_OK;
 }
@@ -67,9 +68,14 @@ char *System::getvar(char *name)
   if (temp == NULL)
     return NULL;
 
-  char *varin = (char *)kmalloc(temp->getSize());
-  memset(varin, 0, temp->getSize());
-  temp->read(0, (u8 *)varin, temp->getSize());
+  u32 length = temp->getSize();
+  char *varin = (char *)kmalloc(length + 1);
+  if (!varin) return nullptr;
+  memset(varin, 0, length + 1);
+  if ((int)temp->read(0, (u8 *)varin, length) < 0) {
+    kfree(varin);
+    return nullptr;
+  }
   return varin;
 }
 

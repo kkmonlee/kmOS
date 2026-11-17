@@ -2,6 +2,8 @@
 #include <filesystem.h>
 #include <shell.h>
 #include <architecture.h>
+#include <core/env.h>
+#include <fcntl.h>
 #include <runtime/unified_alloc.h>
 #include <serial.h>
 
@@ -228,6 +230,25 @@ static bool lifetimes() {
     return true;
 }
 
+static bool environment_file() {
+    Variable variable("test-value", "abc");
+    CHECK(fsm.path("/sys/env/test-value") == &variable);
+    u8 patch[] = {'X', 'Y'};
+    CHECK(variable.write(1, patch, sizeof(patch)) == sizeof(patch));
+    CHECK((int)variable.write(0x40000000, patch, sizeof(patch)) == -12);
+    u8 value[7] = {};
+    CHECK(variable.read(0, value, sizeof(value)) == 3);
+    CHECK(value[0] == 'a' && value[1] == 'X' && value[2] == 'Y');
+    CHECK(variable.write(5, patch, sizeof(patch)) == sizeof(patch));
+    CHECK(variable.read(3, value, sizeof(value)) == 4);
+    CHECK(!value[0] && !value[1] && value[2] == 'X' && value[3] == 'Y');
+    CHECK(variable.setValue("z") == 0 && variable.getSize() == 1);
+    CHECK(variable.read(0, value, sizeof(value)) == 1 && value[0] == 'z');
+    CHECK(variable.open(O_WRONLY | O_TRUNC) == 0 && variable.getSize() == 0);
+    CHECK(variable.read(0, value, sizeof(value)) == 0);
+    return true;
+}
+
 static bool memory_pressure() {
     unified_allocator.set_policy(ALLOC_POLICY_BUDDY);
     void *head = nullptr;
@@ -264,6 +285,7 @@ bool verify_filesystem() {
     CHECK(links(directory));
     CHECK(navigation(root, directory));
     CHECK(lifetimes());
+    CHECK(environment_file());
     CHECK(memory_pressure());
     CHECK(arch.pcurrent->setCurrentDir(root));
     delete directory;

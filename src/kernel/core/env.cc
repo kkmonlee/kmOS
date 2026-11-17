@@ -1,19 +1,13 @@
 #include <os.h>
 #include <env.h>
 #include <filesystem.h>
+#include <arch/x86/x86.h>
+#include <fcntl.h>
 
 extern "C" {
-    int strlen(char *s);
+    int strlen(const char *s);
     void *memcpy(void *dest, const void *src, int n);
-    char *strncpy(char *destString, const char *sourceString, int maxLength);
-}
-
-int strnlen(const char *s, int maxlen) {
-    int len = 0;
-    while (len < maxlen && s[len] != '\0') {
-        len++;
-    }
-    return len;
+    void *memset(void *dest, int value, int n);
 }
 
 extern Filesystem fsm;
@@ -31,28 +25,15 @@ Variable::~Variable()
   }
 }
 
-Variable::Variable(const char *n, const char *v) : File((char*)n, TYPE_FILE)
+Variable::Variable(const char *n, const char *v) : File(n, TYPE_FILE), value_(nullptr)
 {
+  if (v) setValue(v);
   fsm.addFile("/sys/env/", this);
-
-  if (v != nullptr)
-  {
-    io.print("env: create %s (%s) \n", n, v);
-    size_t value_len = strlen((char*)v);
-    value_ = (char *)kmalloc(value_len + 1);
-    memcpy(value_, v, value_len);
-    value_[value_len] = '\0';
-    setSize(value_len + 1);
-  }
-  else
-  {
-    value_ = nullptr;
-  }
 }
 
-u32 Variable::open(u32)
+u32 Variable::open(u32 flags)
 {
-  return RETURN_OK;
+  return flags & O_TRUNC ? truncate(0) : RETURN_OK;
 }
 
 u32 Variable::close()
@@ -60,37 +41,59 @@ u32 Variable::close()
   return RETURN_OK;
 }
 
-u32 Variable::read(u32 pos, u8 *buffer, u32 size)
+u32 Variable::read(u32 pos, u8 *buffer, u32 count)
 {
-  if (value_ == nullptr)
-  {
-    return NOT_DEFINED;
-  }
-
-  u32 length = strlen(value_);
-  if (pos >= length) return 0;
-  if (size > length - pos) size = length - pos;
-  memcpy(buffer, value_ + pos, size);
-  return size;
+  IRQGuard guard;
+  u32 length = getSize();
+  if (!count || pos >= length) return 0;
+  if (count > length - pos) count = length - pos;
+  memcpy(buffer, value_ + pos, count);
+  return count;
 }
 
-u32 Variable::write(u32, u8 *buffer, u32 size)
+u32 Variable::write(u32 pos, u8 *buffer, u32 count)
 {
-  if (value_ != nullptr)
-  {
+  IRQGuard guard;
+  if (!count) return 0;
+  if (pos > 0x7fffffff || count > 0x7fffffff - pos) return (u32)-27;
+  u32 end = pos + count;
+  if (end > getSize()) {
+    int result = truncate(end);
+    if (result) return result;
+  }
+  memcpy(value_ + pos, buffer, count);
+  return count;
+}
+
+int Variable::truncate(u32 length)
+{
+  IRQGuard guard;
+  if (length > 0x7fffffff) return -27;
+  u32 old_length = getSize();
+  if (!length) {
     kfree(value_);
+    value_ = nullptr;
+  } else {
+    if (length > old_length) {
+      char *replacement = (char *)krealloc(value_, length + 1);
+      if (!replacement) return -12;
+      value_ = replacement;
+      memset(value_ + old_length, 0, length - old_length);
+    }
+    value_[length] = '\0';
   }
+  setSize(length);
+  return 0;
+}
 
-  value_ = (char *)kmalloc(size + 1);
-  if (value_ != nullptr)
-  {
-    memcpy(value_, (char *)buffer, size);
-    value_[size] = '\0';
-    setSize(size + 1);
-    return size;
-  }
-
-  return NOT_DEFINED;
+int Variable::setValue(const char *value)
+{
+  IRQGuard guard;
+  if (!value) return -22;
+  u32 length = strlen(value);
+  int result = truncate(length);
+  if (!result && length) memcpy(value_, value, length);
+  return result;
 }
 
 u32 Variable::ioctl(u32 id, u8 *buffer)

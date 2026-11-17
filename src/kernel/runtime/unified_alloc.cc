@@ -349,13 +349,6 @@ void UnifiedAllocator::print_stats() {
         u32 hit_rate = (stats.cache_hits * 100) / (stats.cache_hits + stats.cache_misses);
         io.print("  Cache hit rate: %d%%\n", hit_rate);
     }
-    
-    u32 fragmentation = calculate_fragmentation();
-    io.print("  Estimated fragmentation: %d%%\n", fragmentation);
-}
-
-u32 UnifiedAllocator::calculate_fragmentation() {
-    return 0;
 }
 
 void *UnifiedAllocator::stack_alloc(u32 size, u32) {
@@ -372,10 +365,6 @@ void *UnifiedAllocator::stack_checkpoint() {
 
 void UnifiedAllocator::stack_restore(void *checkpoint) {
     global_stack_allocator.restore_checkpoint(static_cast<struct stack_checkpoint*>(checkpoint));
-}
-
-bool UnifiedAllocator::validate_heap() {
-    return true;
 }
 
 extern "C" {
@@ -397,10 +386,6 @@ void set_alloc_policy(u32 policy) {
 
 void print_alloc_stats() {
     unified_allocator.print_stats();
-}
-
-void validate_kernel_heap() {
-    unified_allocator.validate_heap();
 }
 
 void *kstack_alloc(u32 size) {

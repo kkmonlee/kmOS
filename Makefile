@@ -1,5 +1,6 @@
 CROSS ?= i686-elf
 QEMU ?= qemu-system-i386
+WERROR ?= 0
 RAM ?= 64M
 KERNEL = src/kernel/kernel.elf
 USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf,src/userland/sh.elf,src/userland/ls.elf
@@ -8,7 +9,7 @@ QEMU_ARGS = user $(if $(filter 1,$(USER_SHELL)),usershell) $(if $(DISK),disk=hda
 QEMU_HDA = -drive "file=$(DISK),format=raw,if=ide,index=0"
 QEMU_HDB = -drive "file=$(SWAP),format=raw,if=ide,index=1"
 QEMU_DISKS = $(if $(DISK),$(QEMU_HDA)) $(if $(SWAP),$(QEMU_HDB))
-export CROSS
+export CROSS WERROR
 
 .PHONY: all build run debug test iso test-iso clean check-tools help version check-release release
 
@@ -35,7 +36,7 @@ swap.img:
 test: all
 	python3 integration_tests/version_test.py
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
-	$(CXX) -std=c++17 -fno-builtin -I src/kernel integration_tests/physical_memory_test.cc -o "$$test_dir/memory"; \
+	$(CXX) -std=c++17 -fno-builtin $(if $(filter 1,$(WERROR)),-Werror) -I src/kernel integration_tests/physical_memory_test.cc -o "$$test_dir/memory"; \
 	"$$test_dir/memory"
 	python3 integration_tests/boot_test.py --qemu $(QEMU) --cross $(CROSS) --kernel $(KERNEL)
 

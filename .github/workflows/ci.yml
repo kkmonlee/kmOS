@@ -118,6 +118,8 @@ jobs:
     needs: [prepare-source, build-toolchain]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      WERROR: '1'
 
     steps:
     - name: Download source

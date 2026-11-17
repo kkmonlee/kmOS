@@ -93,7 +93,6 @@ public:
     
     void enable_debug_tracking();
     void disable_debug_tracking();
-    bool validate_heap();
     void dump_allocations();
     
 private:
@@ -114,7 +113,6 @@ private:
     struct allocation_metadata *find_allocation(void *ptr);
     bool should_switch_policy();
     void adjust_policy_for_workload();
-    u32 calculate_fragmentation();
     void *internal_alloc(u32 size, u32 &allocator);
     void internal_free(void *ptr, u32 allocator_hint);
 };
@@ -127,7 +125,6 @@ extern "C" {
     void free_pages(void *ptr, u32 order);
     void set_alloc_policy(u32 policy);
     void print_alloc_stats();
-    void validate_kernel_heap();
 }
 
 inline enum alloc_type get_alloc_type(u32 size) {

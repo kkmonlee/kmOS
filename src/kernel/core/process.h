@@ -5,7 +5,6 @@
 #include <runtime/list.h>
 #include <archprocess.h>
 #include <core/signal.h>
-#include <runtime/buffer.h>
 #include <api/dev/proc.h>
 
 #define ZOMBIE PROC_STATE_ZOMBIE
@@ -37,10 +36,6 @@ public:
   Process(char *n);
   ~Process();
 
-  u32 open(u32 flag) override;
-  u32 close() override;
-  u32 read(u32 pos, u8 *buffer, u32 size) override;
-  u32 write(u32 pos, u8 *buffer, u32 size) override;
   u32 ioctl(u32 id, u8 *buffer) override;
   u32 remove() override;
   void scan() override;
@@ -114,7 +109,6 @@ protected:
   proc_info ppinfo;
   process_st info;
   File *cdir;
-  Buffer *ipc;
   
   u64 total_runtime;
   u64 last_scheduled;

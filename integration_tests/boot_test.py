@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -9,6 +10,11 @@ import struct
 import subprocess
 import tempfile
 import time
+
+
+STRICT_WARNINGS = os.environ.get("WERROR") == "1"
+COMPILE_WARNINGS = ["-Werror"] if STRICT_WARNINGS else []
+LINK_WARNINGS = ["--fatal-warnings"] if STRICT_WARNINGS else []
 
 
 class VM:
@@ -280,11 +286,11 @@ def build_user_test(args, temp, source, name):
     repo = Path(__file__).resolve().parents[1]
     obj = temp / (name + ".o")
     program = temp / (name + ".elf")
-    subprocess.run([args.cross + "-gcc", "-std=c11", "-m32", "-O2", "-g", "-Wall", "-Wextra",
+    subprocess.run([args.cross + "-gcc", "-std=c11", "-m32", "-O2", "-g", "-Wall", "-Wextra", *COMPILE_WARNINGS,
                     "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie", "-fno-stack-protector",
                     "-I", str(repo / "src/userland"), "-c", str(repo / "integration_tests" / source),
                     "-o", str(obj)], check=True)
-    subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
+    subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", *LINK_WARNINGS, "-T",
                     str(repo / "src/userland/linker.ld"), "-o", str(program),
                     str(repo / "src/userland/start.o"), str(repo / "src/userland/alloc.o"), str(obj)], check=True)
     return program
@@ -348,6 +354,20 @@ def user_signals(args, temp):
     print("PASS signal handlers, inheritance, interrupted and restarted syscalls", flush=True)
 
 
+def shell_line_limit(vm, prompt, message):
+    argument = "x" * 506
+    command = "echo " + argument
+    for suffix in ("extra", ""):
+        start = len(vm.text())
+        for offset in range(0, len(command), 48):
+            vm.send_serial(command[offset:offset + 48].encode())
+            expected = command[:offset + 48]
+            vm.wait(lambda text: text[start:].endswith(expected))
+        vm.send_serial((suffix + "\n").encode())
+        output = vm.wait(lambda text: text[start:].endswith(prompt))[start + len(command):]
+        assert output == "\n" + (message if suffix else argument) + "\n" + prompt, output
+
+
 def user_shell(args, temp):
     program = build_user_test(args, temp, "pipe_test.c", "init")
     with VM(args, "pipe-signal", append="user", module=program) as vm:
@@ -362,6 +382,7 @@ def user_shell(args, temp):
     modules = ",".join(map(str, [*programs, fixture]))
     with VM(args, "user-shell", append="user usershell", module=modules) as vm:
         vm.wait(lambda text: "sh$ " in text)
+        shell_line_limit(vm, "sh$ ", "sh: line too long")
         for command, output in (
             ("echo 'hello | world' | cat|cat", "\nhello | world\n"),
             ("cd /etc", ""),
@@ -447,6 +468,7 @@ def user_shell(args, temp):
         vm.send_serial(b"exit\n")
         text = vm.wait(lambda text: "kmOS:/$ " in text)
         assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+        shell_line_limit(vm, "kmOS:/$ ", "Line too long")
     print("PASS interactive shell, pipelines, Ctrl-C, Ctrl-Z and job control", flush=True)
 
 
@@ -1117,8 +1139,8 @@ section .note.GNU-stack noalloc noexec nowrite progbits
         obj = source.with_suffix(".o")
         module = source.with_suffix(".elf")
         source.write_text(template.format(body=body))
-        subprocess.run(["nasm", "-f", "elf32", str(source), "-o", str(obj)], check=True)
-        subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", "-T",
+        subprocess.run(["nasm", "-f", "elf32", *COMPILE_WARNINGS, str(source), "-o", str(obj)], check=True)
+        subprocess.run([args.cross + "-ld", "-m", "elf_i386", "-z", "noexecstack", *LINK_WARNINGS, "-T",
                         str(linker), "-o", str(module), str(obj)], check=True)
         user(args, module, name, status, vector=vector)
     bad = temp / "malformed.elf"

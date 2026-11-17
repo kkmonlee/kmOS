@@ -81,8 +81,6 @@ Process::~Process()
     vmm.destroy_page_directory(info.pd);
   }
   kfree(info.vinfo);
-  
-  delete ipc;
   arch.change_process_father(this, pparent);
 }
 
@@ -111,38 +109,6 @@ Process::Process(char *n) : File(n, TYPE_PROCESS)
     openfp[i] = nullptr;
     close_on_exec[i] = false;
   }
-
-  void *memory = kmalloc(sizeof(Buffer));
-  ipc = memory ? new (memory) Buffer() : nullptr;
-}
-
-u32 Process::open(u32)
-{
-  return RETURN_OK;
-}
-
-u32 Process::close()
-{
-  return RETURN_OK;
-}
-
-u32 Process::read(u32, u8 *buffer, u32 sizee)
-{
-  u32 ret = RETURN_OK;
-  if (!ipc) return ERROR_MEMORY;
-  arch.enable_interrupt();
-  while (ipc->isEmpty())
-    ;
-  ret = ipc->get(buffer, sizee);
-  arch.disable_interrupt();
-  return ret;
-}
-
-u32 Process::write(u32, u8 *buffer, u32 sizee)
-{
-  if (!ipc) return ERROR_MEMORY;
-  ipc->add(buffer, sizee);
-  return sizee;
 }
 
 u32 Process::ioctl(u32 id, u8 *buffer)
