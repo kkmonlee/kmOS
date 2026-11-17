@@ -147,6 +147,7 @@ def boot(args, ram, machine="pc"):
         if args.iso:
             assert all(value in vm.text() for value in ("Starting userland", "Hello from ring 3",
                                                       "kmOS userland", "[USER] Reaped init")), vm.text()
+            assert re.search(r"\bls\b", vm.serial_command("ls /bin").split("ls /bin\n")[-1]), vm.text()
         registers = vm.monitor("info registers")
         cr0 = int(re.search(r"CR0=([0-9a-fA-F]+)", registers)[1], 16)
         assert cr0 & 0x80010000 == 0x80010000, registers
@@ -447,6 +448,96 @@ def user_shell(args, temp):
         text = vm.wait(lambda text: "kmOS:/$ " in text)
         assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
     print("PASS interactive shell, pipelines, Ctrl-C, Ctrl-Z and job control", flush=True)
+
+
+def shell_redirection(args, temp):
+    disk = temp / "redirection.img"
+    with disk.open("wb") as image:
+        image.truncate(8 * 1024 * 1024)
+    subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", str(disk)], check=True)
+    userland = Path(__file__).resolve().parents[1] / "src/userland"
+    modules = ",".join(str(userland / f"{name}.elf") for name in ("cat", "sh"))
+    for mode in ("rw", "ro"):
+        mount = "disk=hda,rw" if mode == "rw" else "disk=hda"
+        with VM(args, f"shell-redirection-{mode}", append=f"user usershell {mount}", module=modules, disk=disk) as vm:
+            vm.wait(lambda text: "sh$ " in text)
+
+            def command(line):
+                start = len(vm.text())
+                vm.send_serial((line + "\n").encode())
+                return vm.wait(lambda text: "sh$ " in text[start:])[start:]
+
+            command("cd /mnt/disk")
+            if mode == "rw":
+                for line in ("echo discarded>note", "echo first >note", "echo second>>note",
+                             "cat<note|cat>'saved copy'", "help >manual", ">empty",
+                             "echo last >unused >last", "cat missing 2>error"):
+                    assert "sh: cannot redirect" not in command(line), line
+                assert "\nfirst\nsecond\n" in command("cat 'saved copy'")
+                assert "\ncd [dir], echo" in command("cat manual")
+                assert "\ncat: open failed\n" in command("cat error")
+                assert "\nlast\n" in command("cat last")
+                assert command("cat unused") == "cat unused\nsh$ "
+                assert command("cat empty") == "cat empty\nsh$ "
+                assert "sh: syntax error" in command("echo broken >")
+                assert "sh: syntax error" in command("cat <<note")
+                assert "\n< > >>\n" in command("echo '< > >>'")
+                text = command("cd /etc >empty <missing")
+                assert "sh: cannot redirect: missing" in text, text
+                assert "\nfirst\nsecond\n" in command("cat <note")
+                assert re.search(r"\[1\] \d+\n", command("cat &"))
+                start = len(vm.text())
+                vm.send_serial(b"fg <note\nfrom-terminal\n")
+                vm.wait(lambda text: "\nfrom-terminal\n" in text[start:])
+                vm.send_serial(b"\x03")
+                vm.wait(lambda text: "^C\nsh$ " in text[start:])
+            else:
+                assert "sh: cannot redirect: note" in command("echo denied >>note")
+                assert "\nfirst\nsecond\n" in command("cat <'saved copy'")
+            vm.send_serial(b"exit\n")
+            text = vm.wait(lambda text: "kmOS:/$ " in text)
+            assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+        checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+    print("PASS shell redirection, append, pipelines, builtins and read-only reboot", flush=True)
+
+
+def directory_listing(args, temp):
+    disk = temp / "directory-listing.img"
+    with disk.open("wb") as image:
+        image.truncate(8 * 1024 * 1024)
+    subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", str(disk)], check=True)
+    program = build_user_test(args, temp, "directory_listing_test.c", "init")
+    with VM(args, "directory-listing-api", append="user disk=hda,rw", module=program, disk=disk) as vm:
+        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
+        assert "directory and metadata syscalls verified" in text and "[USER] Exit status=00000000" in text, text
+        assert "[USER] Reaped init" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+    checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+
+    userland = Path(__file__).resolve().parents[1] / "src/userland"
+    modules = ",".join(str(userland / f"{name}.elf") for name in ("cat", "sh", "ls"))
+    with VM(args, "directory-listing-shell", append="user usershell disk=hda", module=modules, disk=disk) as vm:
+        vm.wait(lambda text: "sh$ " in text)
+
+        def command(line):
+            start = len(vm.text())
+            vm.send_serial((line + "\n").encode())
+            return vm.wait(lambda text: "sh$ " in text[start:])[start:]
+
+        assert "\nls\n" in command("ls /bin | cat")
+        command("cd /mnt/disk/sample")
+        visible = command("ls").splitlines()[1:-1]
+        assert set(visible) == {"notes with spaces", "new", *(f"file{i:02d}" for i in range(19))}, visible
+        hidden = command("ls -a").splitlines()[1:-1]
+        assert set(hidden) == {*visible, ".", "..", ".hidden"}, hidden
+        assert "\n-rw-r----- 1 0 0 3 notes with spaces\n" in command("ls -l")
+        assert "\n-rw-r----- 1 0 0 3 notes with spaces\n" in command("ls -l 'notes with spaces'")
+        assert "ls: cannot stat: missing" in command("ls missing")
+        vm.send_serial(b"exit\n")
+        text = vm.wait(lambda text: "kmOS:/$ " in text)
+        assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+    print("PASS directory enumeration, file metadata and userspace ls", flush=True)
 
 
 def user_heap(args, temp):
@@ -1110,6 +1201,8 @@ def main():
         user_heap(args, Path(temp))
         user_signals(args, Path(temp))
         user_shell(args, Path(temp))
+        shell_redirection(args, Path(temp))
+        directory_listing(args, Path(temp))
     boot(args, 64, "q35")
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")
     with tempfile.TemporaryDirectory(prefix="kmos-user-") as temp:

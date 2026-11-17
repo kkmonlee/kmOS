@@ -116,7 +116,7 @@ Process::Process(char *n) : File(n, TYPE_PROCESS)
   ipc = memory ? new (memory) Buffer() : nullptr;
 }
 
-u32 Process::open(u32 flag)
+u32 Process::open(u32)
 {
   return RETURN_OK;
 }
@@ -126,7 +126,7 @@ u32 Process::close()
   return RETURN_OK;
 }
 
-u32 Process::read(u32 pos, u8 *buffer, u32 sizee)
+u32 Process::read(u32, u8 *buffer, u32 sizee)
 {
   u32 ret = RETURN_OK;
   if (!ipc) return ERROR_MEMORY;
@@ -138,7 +138,7 @@ u32 Process::read(u32 pos, u8 *buffer, u32 sizee)
   return ret;
 }
 
-u32 Process::write(u32 pos, u8 *buffer, u32 sizee)
+u32 Process::write(u32, u8 *buffer, u32 sizee)
 {
   if (!ipc) return ERROR_MEMORY;
   ipc->add(buffer, sizee);
@@ -455,9 +455,11 @@ u32 Process::addFile(File *file, u32 mode)
 
 int Process::openFile(const char *path, u32 flags, u32 mode) {
   IRQGuard guard;
-  if ((flags & ~(O_CREAT | O_EXCL | O_TRUNC | O_CLOEXEC | 3U)) || (flags & 3) == 3 ||
+  if ((flags & ~(O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_CLOEXEC | O_DIRECTORY | O_ACCMODE)) ||
+      (flags & O_ACCMODE) == O_ACCMODE ||
       ((flags & O_EXCL) && !(flags & O_CREAT)) ||
-      ((flags & O_TRUNC) && (flags & 3) == O_RDONLY)) return -22;
+      ((flags & O_DIRECTORY) && (flags & (O_CREAT | O_TRUNC))) ||
+      ((flags & O_TRUNC) && (flags & O_ACCMODE) == O_RDONLY)) return -22;
   u32 fd = 0;
   while (fd < CONFIG_MAX_FILE && openfp[fd]) ++fd;
   if (fd == CONFIG_MAX_FILE) return -24;
@@ -466,9 +468,9 @@ int Process::openFile(const char *path, u32 flags, u32 mode) {
   File *file = nullptr;
   int result = fsm.open(path, flags, mode, file);
   if (result >= 0 && (flags & O_TRUNC) && file->getType() != TYPE_FILE) result = -22;
-  if (!result) result = file->open(flags & (O_TRUNC | 3));
+  if (!result) result = file->open(flags & (O_TRUNC | O_ACCMODE));
   if (result < 0) { kfree(memory); return result; }
-  openfp[fd] = new (memory) openfile(file, flags & 3);
+  openfp[fd] = new (memory) openfile(file, flags & (O_APPEND | O_ACCMODE));
   close_on_exec[fd] = (flags & O_CLOEXEC) != 0;
   return fd;
 }
@@ -495,6 +497,13 @@ int Process::deleteFile(u32 fd)
   int result = description->close();
   delete description;
   return result;
+}
+
+int Process::duplicateFile(u32 from) {
+  if (!getFile(from)) return -9;
+  for (u32 to = 0; to < CONFIG_MAX_FILE; ++to)
+    if (!openfp[to]) return duplicateFile(from, to);
+  return -24;
 }
 
 int Process::duplicateFile(u32 from, u32 to) {

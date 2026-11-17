@@ -358,7 +358,7 @@ u32 UnifiedAllocator::calculate_fragmentation() {
     return 0;
 }
 
-void *UnifiedAllocator::stack_alloc(u32 size, u32 flags) {
+void *UnifiedAllocator::stack_alloc(u32 size, u32) {
     return global_stack_allocator.alloc(size, STACK_ALIGNMENT);
 }
 

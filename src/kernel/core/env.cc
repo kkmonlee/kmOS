@@ -50,7 +50,7 @@ Variable::Variable(const char *n, const char *v) : File((char*)n, TYPE_FILE)
   }
 }
 
-u32 Variable::open(u32 flag)
+u32 Variable::open(u32)
 {
   return RETURN_OK;
 }
@@ -74,7 +74,7 @@ u32 Variable::read(u32 pos, u8 *buffer, u32 size)
   return size;
 }
 
-u32 Variable::write(u32 pos, u8 *buffer, u32 size)
+u32 Variable::write(u32, u8 *buffer, u32 size)
 {
   if (value_ != nullptr)
   {

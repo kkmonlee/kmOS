@@ -2,6 +2,8 @@
 #include <file.h>
 #include <runtime/alloc.h>
 #include <arch/x86/architecture.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 extern "C" {
     void pd_add_page(char *v_addr, char *p_addr, u32 flags, struct page_directory *pd);
@@ -36,6 +38,7 @@ static void strreplace(char *s, char a, char to)
 }
 
 u32 File::inode_system = 0;
+u64 File::next_entry_cookie = 3;
 
 File::File(const char *n, u8 t, bool sanitize)
 {
@@ -104,6 +107,7 @@ u32 File::addChild(File *n)
   if (n->parent == this) return RETURN_OK;
 
   n->detach();
+  n->entry_cookie = next_entry_cookie++;
   n->removed = false;
   n->setParent(this);
   n->setPrec(NULL);
@@ -141,7 +145,7 @@ File *File::getNext() { return next; }
 File *File::getPrec() { return prec; }
 File *File::getLink() { return link; }
 u32 File::getSize() { return size; }
-u32 File::getInode() { return inode; }
+u32 File::getInode() const { return inode; }
 u8 File::getType() { return type; }
 char *File::getName() { return name; }
 
@@ -197,10 +201,11 @@ File *File::find(const char *n)
   return NULL;
 }
 
-u32 File::open(u32 /*flag*/) { return NOT_DEFINED; }
-u32 File::close() { return NOT_DEFINED; }
+u32 File::open(u32 flag) { return type == TYPE_DIRECTORY && !flag ? RETURN_OK : NOT_DEFINED; }
+u32 File::close() { return type == TYPE_DIRECTORY ? RETURN_OK : NOT_DEFINED; }
 u32 File::read(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
 u32 File::write(u32 /*pos*/, u8 * /*buffer*/, u32 /*size*/) { return NOT_DEFINED; }
+u32 File::append(u8 *, u32, u32 &) { return (u32)-22; }
 u32 File::ioctl(u32 /*id*/, u8 * /*buffer*/) { return NOT_DEFINED; }
 int File::createFile(const char *, u32, File *&file) {
   file = nullptr;
@@ -234,26 +239,52 @@ void File::release() {
   irq_restore(flags);
 }
 
-/**
- * Returns the file statistics with actual data.
- */
-stat_fs File::stat()
-{
-  stat_fs st;
-  st.st_dev = 0;
-  st.st_ino = 0;
-  st.st_mode = type;
-  st.st_nlink = 1;
-  st.st_uid = 0;
-  st.st_gid = 0;
-  st.st_rdev = 0;
-  st.st_size = getSize();
-  st.st_blksize = 4096;
-  st.st_blocks = (getSize() + 4095) / 4096;
-  st.st_atime = 0;
-  st.st_mtime = 0;
-  st.st_ctime = 0;
-  return st;
+static u32 directory_type(u8 type) {
+  switch (type) {
+  case TYPE_FILE: return DT_REG;
+  case TYPE_DIRECTORY: return DT_DIR;
+  case TYPE_DEVICE: return DT_CHR;
+  case TYPE_LINK: return DT_LNK;
+  case TYPE_PIPE: return DT_FIFO;
+  default: return DT_UNKNOWN;
+  }
+}
+
+static void directory_entry(struct dirent &entry, File *file, const char *name) {
+  entry = {};
+  entry.d_ino = file->getInode();
+  entry.d_type = directory_type(file->getType());
+  for (u32 i = 0; i + 1 < sizeof(entry.d_name) && name[i]; ++i) entry.d_name[i] = name[i];
+}
+
+int File::readDirectory(u64 &position, struct dirent *entries, u32 count) {
+  if (type != TYPE_DIRECTORY) return -20;
+  if (removed) return -2;
+  scan();
+  u32 written = 0;
+  while (position < 2 && written < count) {
+    File *up = getParent();
+    if (!position) directory_entry(entries[written++], this, ".");
+    else directory_entry(entries[written++], up ? up : this, "..");
+    ++position;
+  }
+  for (File *item = child; item && written < count; item = item->next) {
+    if (position > 2 && item->entry_cookie >= position) continue;
+    directory_entry(entries[written++], item, item->name);
+    position = item->entry_cookie;
+  }
+  return written;
+}
+
+int File::stat(struct stat &result) {
+  result = {};
+  result.st_ino = getInode();
+  result.st_mode = (directory_type(type) << 12) | (type == TYPE_DIRECTORY ? 0555 : 0444);
+  if (type == TYPE_DEVICE || type == TYPE_PIPE) result.st_mode |= 0222;
+  result.st_nlink = removed ? 0 : 1;
+  result.st_size = getSize();
+  result.st_blksize = 4096;
+  return 0;
 }
 
 void File::scan() {

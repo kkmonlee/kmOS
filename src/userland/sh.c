@@ -1,10 +1,18 @@
 #include "user.h"
 
-enum { max_commands = 8, max_args = 32, line_size = 512, max_jobs = 16 };
+enum { max_commands = 8, max_args = 32, max_redirects = 8, line_size = 512, max_jobs = 16 };
+
+typedef struct {
+    int fd;
+    int flags;
+    const char *path;
+} Redirect;
 
 typedef struct {
     int argc;
     char *argv[max_args + 1];
+    int redirect_count;
+    Redirect redirects[max_redirects];
 } Command;
 
 typedef struct {
@@ -20,6 +28,7 @@ static Job jobs[max_jobs];
 static u32 job_order;
 static volatile int reading_command;
 static volatile int child_changed;
+static int terminal_fd;
 
 static int equal(const char *left, const char *right) {
     while (*left && *left == *right) { ++left; ++right; }
@@ -108,50 +117,101 @@ static int input(char *line) {
     }
 }
 
-static int parse(char *line, Command *commands, int *background) {
-    char *out = line;
-    int index = 0;
-    for (;;) {
-        while (*line == ' ' || *line == '\t') ++line;
-        if (!*line) break;
-        Command *command = &commands[index];
-        if (*line == '|' || *line == '&' || command->argc == max_args) return -1;
-        command->argv[command->argc++] = out;
-        char quote = 0;
-        while (*line) {
-            char c = *line;
-            if (!quote && (c == ' ' || c == '\t' || c == '|' || c == '&')) break;
-            ++line;
-            if (c == quote) quote = 0;
-            else if (!quote && (c == '\'' || c == '"')) quote = c;
-            else if (c == '\\' && quote != '\'') {
-                if (!*line) return -1;
-                *out++ = *line++;
-            } else {
-                *out++ = c;
-            }
-        }
-        if (quote) return -1;
-        char delimiter = *line;
-        if (delimiter) ++line;
-        *out++ = 0;
-        command->argv[command->argc] = 0;
-        if (!delimiter) break;
-        while (*line == ' ' || *line == '\t') ++line;
-        if ((delimiter == ' ' || delimiter == '\t') && (*line == '|' || *line == '&')) {
-            delimiter = *line++;
-        }
-        if (delimiter == '|') {
-            if (++index == max_commands) return -1;
-        } else if (delimiter == '&') {
-            while (*line == ' ' || *line == '\t') ++line;
-            if (*line) return -1;
-            *background = 1;
-            break;
+static const char *skip_space(const char *line) {
+    while (*line == ' ' || *line == '\t') ++line;
+    return line;
+}
+
+static int word_end(char c) {
+    return !c || c == ' ' || c == '\t' || c == '|' || c == '&' || c == '<' || c == '>';
+}
+
+static char *parse_word(const char **input, char **output) {
+    const char *line = *input;
+    if (word_end(*line)) return 0;
+    char *out = *output;
+    char *word = out;
+    char quote = 0;
+    while (*line && (quote || !word_end(*line))) {
+        char c = *line++;
+        if (c == quote) quote = 0;
+        else if (!quote && (c == '\'' || c == '"')) quote = c;
+        else if (c == '\\' && quote != '\'') {
+            if (!*line) return 0;
+            *out++ = *line++;
+        } else {
+            *out++ = c;
         }
     }
-    if (!commands[index].argc) return index ? -1 : 0;
+    if (quote) return 0;
+    *out++ = 0;
+    *input = line;
+    *output = out;
+    return word;
+}
+
+static int parse(const char *line, char *words, Command *commands, int *background) {
+    int index = 0;
+    for (line = skip_space(line); *line; line = skip_space(line)) {
+        Command *command = &commands[index];
+        if (*line == '|' || *line == '&') {
+            if (!command->argc && !command->redirect_count) return -1;
+            if (*line++ == '&') {
+                if (*skip_space(line)) return -1;
+                *background = 1;
+                break;
+            }
+            if (++index == max_commands) return -1;
+            continue;
+        }
+
+        const char *operator = line;
+        while (*operator >= '0' && *operator <= '9') ++operator;
+        if (*operator == '<' || *operator == '>') {
+            if (command->redirect_count == max_redirects) return -1;
+            int fd = *operator == '>';
+            if (operator != line) {
+                if (operator - line != 1 || *line > '2') return -1;
+                fd = *line - '0';
+            }
+            line = operator + 1;
+            int flags = O_RDONLY;
+            if (*operator == '>') {
+                flags = O_WRONLY | O_CREAT | (*line == '>' ? O_APPEND : O_TRUNC);
+                if (*line == '>') ++line;
+            }
+            line = skip_space(line);
+            char *path = parse_word(&line, &words);
+            if (!path) return -1;
+            command->redirects[command->redirect_count++] = (Redirect){fd, flags, path};
+            continue;
+        }
+
+        if (command->argc == max_args) return -1;
+        char *word = parse_word(&line, &words);
+        if (!word) return -1;
+        command->argv[command->argc++] = word;
+    }
+    if (!commands[index].argc && !commands[index].redirect_count) return index ? -1 : 0;
     return index + 1;
+}
+
+static int redirect(const Command *command) {
+    for (int i = 0; i < command->redirect_count; ++i) {
+        const Redirect *target = &command->redirects[i];
+        int fd = open(target->path, target->flags, 0666);
+        if (fd >= 0) {
+            if (fd == target->fd) continue;
+            int result = dup2(fd, target->fd);
+            close(fd);
+            if (result >= 0) continue;
+        }
+        error("sh: cannot redirect: ");
+        error(target->path);
+        error("\n");
+        return -1;
+    }
+    return 0;
 }
 
 static void close_pipes(int pipes[][2], int count) {
@@ -162,6 +222,8 @@ static void close_pipes(int pipes[][2], int count) {
 }
 
 static void run_command(const Command *command) {
+    if (redirect(command)) exit(1);
+    if (!command->argc) exit(0);
     const char *name = command->argv[0];
     if (equal(name, "echo")) {
         for (int i = 1; i < command->argc; ++i) {
@@ -239,7 +301,7 @@ static int start_pipeline(Command *commands, int count, int terminal, int backgr
 
     close_pipes(pipes, count - 1);
     close(gate[0]);
-    if (!failed && terminal && !background && set_foreground(job->group) < 0) failed = 1;
+    if (!failed && terminal && !background && set_terminal_group(terminal_fd, job->group) < 0) failed = 1;
     if (failed) {
         for (int i = 0; i < job->count; ++i) kill(job->pids[i], SIGKILL);
     }
@@ -294,7 +356,7 @@ static void wait_foreground(Job *job, int terminal) {
             }
         }
     }
-    if (terminal) set_foreground(0);
+    if (terminal) set_terminal_group(terminal_fd, 0);
     if (terminal && interrupted) puts("^C\n");
     if (terminal && job_state(job) == JOB_STOPPED) print_job(job);
     else job->group = 0;
@@ -311,13 +373,13 @@ static void resume_job(Command *command, int foreground) {
         int number = decimal(id + (*id == '%'));
         if (number > 0 && number <= max_jobs && jobs[number - 1].group) job = &jobs[number - 1];
     }
-    if (!job || (foreground && set_foreground(job->group) < 0)) {
+    if (!job || (foreground && set_terminal_group(terminal_fd, job->group) < 0)) {
         error("sh: no such job\n");
         return;
     }
     if (job->stopped) {
         if (kill(-job->group, SIGCONT) < 0) {
-            if (foreground) set_foreground(0);
+            if (foreground) set_terminal_group(terminal_fd, 0);
             error("sh: no such job\n");
             return;
         }
@@ -362,6 +424,73 @@ static void close_jobs(void) {
         if (jobs[i].group) collect_job(&jobs[i]);
 }
 
+enum builtin { NONE, EXIT, CD, KILL, HELP, JOBS, FG, BG };
+
+static enum builtin find_builtin(const Command *command) {
+    static const char *const names[] = {"exit", "cd", "kill", "help", "jobs", "fg", "bg"};
+    if (command->argc) {
+        for (u32 i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+            if (equal(command->argv[0], names[i])) return (enum builtin)(i + 1);
+    }
+    return NONE;
+}
+
+static int run_builtin(Command *command, enum builtin builtin) {
+    int saved[] = {-1, -1, -1};
+    int leaving = 0;
+    for (int i = 0; i < command->redirect_count; ++i) {
+        int fd = command->redirects[i].fd;
+        if (saved[fd] != -1) continue;
+        saved[fd] = dup(fd);
+        if (saved[fd] < 3) {
+            if (saved[fd] >= 0) close(saved[fd]);
+            saved[fd] = -1;
+            error("sh: cannot save descriptor\n");
+            goto restore;
+        }
+    }
+    if (saved[0] >= 0) terminal_fd = saved[0];
+    if (redirect(command)) goto restore;
+    switch (builtin) {
+    case EXIT:
+        leaving = 1;
+        break;
+    case CD:
+        if (command->argc > 2 || chdir(command->argc == 2 ? command->argv[1] : "/"))
+            error("sh: cd failed\n");
+        break;
+    case KILL: {
+        int pid = command->argc == 2 ? decimal(command->argv[1]) : -1;
+        if (pid <= 0 || kill(pid, SIGTERM)) error("sh: kill failed\n");
+        break;
+    }
+    case HELP:
+        puts("cd [dir], echo [text], kill pid, jobs, fg [%job], bg [%job], exit\n");
+        break;
+    case JOBS:
+        reap_jobs();
+        list_jobs();
+        break;
+    case FG:
+    case BG:
+        reap_jobs();
+        resume_job(command, builtin == FG);
+        break;
+    default:
+        break;
+    }
+
+restore:
+    terminal_fd = 0;
+    for (u32 fd = 0; fd < sizeof(saved) / sizeof(saved[0]); ++fd) {
+        if (saved[fd] >= 0) {
+            dup2(saved[fd], fd);
+            close(saved[fd]);
+        }
+    }
+    return leaving;
+}
+
 int main(void) {
     char line[line_size];
     int terminal = set_foreground(0) == 0;
@@ -380,33 +509,17 @@ int main(void) {
         if (read_line < 0) { puts("\n"); break; }
         if (!read_line) continue;
         char arguments[line_size];
-        for (int i = 0; (arguments[i] = line[i]); ++i) {}
         Command commands[max_commands] = {0};
         int background = 0;
-        int count = parse(arguments, commands, &background);
+        int count = parse(line, arguments, commands, &background);
         if (count < 0) { error("sh: syntax error\n"); continue; }
         if (!count) continue;
-        Command *command = &commands[0];
-        const char *name = command->argv[0];
+        enum builtin builtin = count == 1 && !background ? find_builtin(&commands[0]) : NONE;
         if (background) {
             if (job_control) run_job(commands, count, line, 1, 1);
             else error("sh: job control unavailable\n");
-        } else if (count == 1 && equal(name, "exit")) {
-            break;
-        } else if (count == 1 && equal(name, "cd")) {
-            if (command->argc > 2 || chdir(command->argc == 2 ? command->argv[1] : "/"))
-                error("sh: cd failed\n");
-        } else if (count == 1 && equal(name, "kill")) {
-            int pid = command->argc == 2 ? decimal(command->argv[1]) : -1;
-            if (pid <= 0 || kill(pid, 15)) error("sh: kill failed\n");
-        } else if (count == 1 && equal(name, "help")) {
-            puts("cd [dir], echo [text], kill pid, jobs, fg [%job], bg [%job], exit\n");
-        } else if (count == 1 && equal(name, "jobs")) {
-            reap_jobs();
-            list_jobs();
-        } else if (count == 1 && (equal(name, "fg") || equal(name, "bg"))) {
-            reap_jobs();
-            resume_job(command, equal(name, "fg"));
+        } else if (builtin != NONE) {
+            if (run_builtin(&commands[0], builtin)) break;
         } else {
             run_job(commands, count, line, terminal, 0);
         }

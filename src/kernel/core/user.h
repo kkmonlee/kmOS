@@ -16,6 +16,9 @@ public:
   User(char *n);
   ~User();
 
+  using File::read;
+  using File::write;
+
   u32 open(u32 flag);
   u32 close();
   u32 read(u8 *buffer, u32 size);

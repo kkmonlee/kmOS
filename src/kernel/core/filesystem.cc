@@ -47,12 +47,12 @@ Filesystem::~Filesystem()
   delete root;
 }
 
-void Filesystem::mknod(const char *module, const char *name, u32 flag)
+void Filesystem::mknod(const char *module, const char *name, u32)
 {
   if (!module || !name || !dev)
     return;
 
-  File *device_node = dev->createChild(name, TYPE_DEVICE);
+  dev->createChild(name, TYPE_DEVICE);
 }
 
 File *Filesystem::getRoot()
@@ -69,6 +69,11 @@ int Filesystem::open(const char *name, u32 flags, u32 mode, File *&file) {
   IRQGuard guard;
   int error;
   file = path(name, &error);
+  if (flags & O_DIRECTORY) {
+    if (!file) return error;
+    if (file->getType() != TYPE_DIRECTORY) return -20;
+    return (flags & O_ACCMODE) == O_RDONLY ? 0 : -21;
+  }
   if (file) {
     if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) return -17;
     return file->getType() == TYPE_FILE || file->getType() == TYPE_DEVICE ? 0 : -21;

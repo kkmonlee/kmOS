@@ -25,6 +25,7 @@ struct openfile : public File
   u32 close() override;
   u32 mode;
   u32 ptr;
+  u64 directory_position = 0;
   u32 users;
 };
 
@@ -61,6 +62,7 @@ public:
   int openFile(const char *path, u32 flags, u32 mode);
   File *getFile(u32 fd);
   int deleteFile(u32 fd);
+  int duplicateFile(u32 from);
   int duplicateFile(u32 from, u32 to);
   bool setupConsole();
   void closeFiles(bool exec = false);

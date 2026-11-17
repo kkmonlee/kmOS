@@ -3,6 +3,9 @@
 
 #include <runtime/types.h>
 
+struct dirent;
+struct stat;
+
 enum
 {
   TYPE_FILE,
@@ -25,6 +28,9 @@ public:
   virtual u32 close();
   virtual u32 read(u32 pos, u8 *buffer, u32 size);
   virtual u32 write(u32 pos, u8 *buffer, u32 size);
+  virtual u32 append(u8 *buffer, u32 size, u32 &end);
+  virtual int readDirectory(u64 &position, struct dirent *entries, u32 count);
+  virtual int stat(struct stat &result);
   virtual u32 ioctl(u32 id, u8 *buffer);
   virtual int createFile(const char *name, u32 mode, File *&file);
   virtual int unlinkFile(const char *name);
@@ -62,19 +68,19 @@ public:
   File *getLink();
   u8 getType();
   virtual u32 getSize();
-  u32 getInode();
-
-  stat_fs stat();
+  virtual u32 getInode() const;
 
 protected:
   void detach();
 
   static u32 inode_system;
+  static u64 next_entry_cookie;
   char *map_memory;
   char *name;
   u32 size;
   u8 type;
   u32 inode;
+  u64 entry_cookie = 0;
   u32 references;
   bool removed;
   File *dev;

@@ -3,6 +3,8 @@
 #include <architecture.h>
 #include <filesystem.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <cow.h>
 #include <memory_file.h>
 #include <api/kernel/syscall_table.h>
@@ -47,7 +49,7 @@ void call_ftruncate() {
   Process *process = arch.pcurrent;
   File *file = process->getFile(arch.getArg(0));
   openfile *description = process->getFileInfo(arch.getArg(0));
-  if (!file || description->mode == O_RDONLY) { arch.setRet((u32)-9); return; }
+  if (!file || (description->mode & O_ACCMODE) == O_RDONLY) { arch.setRet((u32)-9); return; }
   if (file->getType() != TYPE_FILE || (s32)arch.getArg(1) < 0) {
     arch.setRet((u32)-22);
     return;
@@ -60,6 +62,12 @@ void call_lseek() {
   File *file = process->getFile(arch.getArg(0));
   openfile *description = process->getFileInfo(arch.getArg(0));
   if (!file) { arch.setRet((u32)-9); return; }
+  if (file->getType() == TYPE_DIRECTORY) {
+    if (arch.getArg(1) || arch.getArg(2) != SEEK_SET) { arch.setRet((u32)-22); return; }
+    description->directory_position = 0;
+    arch.setRet(0);
+    return;
+  }
   if (file->getType() != TYPE_FILE) { arch.setRet((u32)-29); return; }
   u32 origin = arch.getArg(2);
   if (origin > SEEK_END) { arch.setRet((u32)-22); return; }
@@ -72,12 +80,64 @@ void call_lseek() {
 
 void call_close() { arch.setRet(arch.pcurrent->deleteFile(arch.getArg(0))); }
 
+void call_getdents() {
+  Process *process = arch.pcurrent;
+  u32 fd = arch.getArg(0), address = arch.getArg(1), bytes = arch.getArg(2);
+  File *file = process->getFile(fd);
+  if (!file) { arch.setRet((u32)-9); return; }
+  if (file->getType() != TYPE_DIRECTORY) { arch.setRet((u32)-20); return; }
+  if (bytes < sizeof(struct dirent)) { arch.setRet((u32)-22); return; }
+  struct dirent entries[PAGESIZE / sizeof(struct dirent)];
+  u32 count = bytes / sizeof(struct dirent);
+  if (count > sizeof(entries) / sizeof(entries[0])) count = sizeof(entries) / sizeof(entries[0]);
+  openfile *description = process->getFileInfo(fd);
+  u64 position = description->directory_position;
+  int result = file->readDirectory(position, entries, count);
+  if (result <= 0) { arch.setRet(result); return; }
+  int error;
+  bytes = result * sizeof(struct dirent);
+  if (!vmm.copy_to_user(process->getPInfo()->pd, address, entries, bytes, &error)) {
+    if (!bad_pointer(error != -14)) arch.setRet(error);
+    return;
+  }
+  description->directory_position = position;
+  arch.setRet(bytes);
+}
+
+static void return_stat(File *file, u32 address) {
+  struct stat result;
+  int error = file->stat(result);
+  if (error) { arch.setRet(error); return; }
+  if (!vmm.copy_to_user(arch.pcurrent->getPInfo()->pd, address, &result, sizeof(result), &error)) {
+    if (!bad_pointer(error != -14)) arch.setRet(error);
+    return;
+  }
+  arch.setRet(0);
+}
+
+void call_stat() {
+  char path[Filesystem::kMaxPathLength];
+  int error = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
+  if (bad_pointer(error != -14)) return;
+  if (error) { arch.setRet(error); return; }
+  File *file = fsm.path(path, &error);
+  if (!file) { arch.setRet(error); return; }
+  return_stat(file, arch.getArg(1));
+}
+
+void call_fstat() {
+  File *file = arch.pcurrent->getFile(arch.getArg(0));
+  if (!file) { arch.setRet((u32)-9); return; }
+  return_stat(file, arch.getArg(1));
+}
+
 void call_read() {
   Process *process = arch.pcurrent;
   u32 fd = arch.getArg(0), address = arch.getArg(1), size = arch.getArg(2);
   File *file = process->getFile(fd);
   openfile *description = process->getFileInfo(fd);
-  if (!file || description->mode == 1) { arch.setRet((u32)-9); return; }
+  if (!file || (description->mode & O_ACCMODE) == O_WRONLY) { arch.setRet((u32)-9); return; }
+  if (file->getType() == TYPE_DIRECTORY) { arch.setRet((u32)-21); return; }
   if (!size) { arch.setRet(0); return; }
   u8 buffer[PAGESIZE];
   u32 count = size > sizeof(buffer) ? sizeof(buffer) : size;
@@ -113,7 +173,7 @@ void call_write() {
   u32 fd = arch.getArg(0), address = arch.getArg(1), size = arch.getArg(2);
   File *file = process->getFile(fd);
   openfile *description = process->getFileInfo(fd);
-  if (!file || description->mode == 0) { arch.setRet((u32)-9); return; }
+  if (!file || (description->mode & O_ACCMODE) == O_RDONLY) { arch.setRet((u32)-9); return; }
   if (!size) { arch.setRet(0); return; }
   page_directory *pd = process->getPInfo()->pd;
   if (bad_pointer(vmm.user_range(pd, address, size))) return;
@@ -124,20 +184,24 @@ void call_write() {
     if (!bad_pointer(error != -14)) arch.setRet(error);
     return;
   }
-  if (file->getType() == TYPE_FILE && count > 0xffffffffU - description->ptr) {
+  bool regular = file->getType() == TYPE_FILE;
+  bool append = regular && (description->mode & O_APPEND);
+  u32 position = description->ptr;
+  if (regular && !append && count > 0xffffffffU - position) {
     arch.setRet((u32)-75);
     return;
   }
-  int result = file->write(description->ptr, buffer, count);
+  int result = append ? file->append(buffer, count, position) : file->write(position, buffer, count);
   if (result == -11 && file->waitable()) { process->waitForFile(file, SYS_write); return; }
   if (result == -32 && file->getType() == TYPE_PIPE) process->sendSignal(SIGPIPE);
   if (result > (int)count) result = -5;
-  if (result > 0 && file->getType() == TYPE_FILE) description->ptr += result;
+  if (result > 0 && regular) description->ptr = append ? position : position + result;
   arch.setRet(result);
 }
 
 void call_exit() { arch.pcurrent->exit(arch.getArg(0)); }
 void call_fork() { arch.setRet(arch.pcurrent->fork()); }
+void call_dup() { arch.setRet(arch.pcurrent->duplicateFile(arch.getArg(0))); }
 void call_dup2() { arch.setRet(arch.pcurrent->duplicateFile(arch.getArg(0), arch.getArg(1))); }
 void call_wait() {
   Process *process = arch.pcurrent;

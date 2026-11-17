@@ -3,6 +3,7 @@
 #include <core/block_device.h>
 #include <runtime/alloc.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 extern "C" {
     void *memcpy(void *dest, const void *src, int n);
@@ -42,6 +43,29 @@ public:
     ~Ext2Mount() { kfree(groups_); }
     void retain() { ++references_; }
     void release() { if (!--references_) delete this; }
+
+    int stat_inode(u32 number, struct stat &result) {
+        ext2_inode inode;
+        if (!read_inode(number, &inode)) return -5;
+        result = {};
+        result.st_dev = device_->getInode() + 1;
+        result.st_ino = number;
+        result.st_mode = inode.i_mode;
+        result.st_nlink = inode.i_links_count;
+        result.st_uid = inode.i_uid;
+        result.st_gid = inode.i_gid;
+        if (super_.s_rev_level && super_.s_creator_os == 0) {
+            result.st_uid |= (inode.i_osd2[1] & 0xffff) << 16;
+            result.st_gid |= inode.i_osd2[1] & 0xffff0000;
+        }
+        result.st_size = inode.i_size;
+        result.st_blksize = block_size_;
+        result.st_blocks = inode.i_blocks;
+        result.st_atime = inode.i_atime;
+        result.st_mtime = inode.i_mtime;
+        result.st_ctime = inode.i_ctime;
+        return 0;
+    }
 
     bool initialize() {
         if (!device_ || device_->read(1024, (u8 *)&super_, sizeof(super_)) != RETURN_OK)
@@ -1085,6 +1109,8 @@ u32 Ext2Node::close() {
     return mount_ ? mount_->reap_inode(inode_, this) : 0;
 }
 
+int Ext2Node::stat(struct stat &result) { return mount_ ? mount_->stat_inode(inode_, result) : -5; }
+
 Ext2Directory::Ext2Directory(const char *name, Ext2Mount *mount, u32 inode)
     : Ext2Node(name, TYPE_DIRECTORY, mount, inode), loaded_(false), former_parent_(nullptr) {}
 
@@ -1118,6 +1144,12 @@ bool Ext2Directory::load() {
 }
 
 void Ext2Directory::scan() { load(); }
+
+int Ext2Directory::readDirectory(u64 &position, struct dirent *entries, u32 count) {
+    if (removed) return -2;
+    if (!load()) return -5;
+    return File::readDirectory(position, entries, count);
+}
 
 int Ext2Directory::createFile(const char *name, u32 mode, File *&file) {
     IRQGuard guard;
@@ -1181,11 +1213,24 @@ u32 Ext2RegularFile::read(u32 pos, u8 *buffer, u32 size) {
 }
 
 u32 Ext2RegularFile::write(u32 pos, u8 *buffer, u32 size) {
+    return write_data(pos, buffer, size, nullptr);
+}
+
+u32 Ext2RegularFile::append(u8 *buffer, u32 size, u32 &end) {
+    return write_data(0, buffer, size, &end);
+}
+
+u32 Ext2RegularFile::write_data(u32 pos, u8 *buffer, u32 size, u32 *append_end) {
     IRQGuard guard;
     ext2_inode inode;
     if (!mount_ || !mount_->read_inode(inode_, &inode)) return (u32)-5;
+    if (append_end) pos = inode.i_size;
     u32 result = mount_->write_file_data(inode_, inode, pos, buffer, size);
-    if ((s32)result > 0) getSize();
+    if ((s32)result > 0) {
+        u32 end = pos + result;
+        setSize(end > inode.i_size ? end : inode.i_size);
+        if (append_end) *append_end = end;
+    }
     return result;
 }
 

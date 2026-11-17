@@ -11,7 +11,7 @@ Socket::Socket(const char *n) : File((char*)n, TYPE_FILE)
   fsm.addFile("/sys/sockets/", this);
 }
 
-u32 Socket::open(u32 flag)
+u32 Socket::open(u32)
 {
   return RETURN_OK;
 }
@@ -21,17 +21,17 @@ u32 Socket::close()
   return RETURN_OK;
 }
 
-u32 Socket::read(u32 pos, u8 *buffer, u32 size)
+u32 Socket::read(u32, u8 *, u32)
 {
   return NOT_DEFINED;
 }
 
-u32 Socket::write(u32 pos, u8 *buffer, u32 size)
+u32 Socket::write(u32, u8 *, u32)
 {
   return NOT_DEFINED;
 }
 
-u32 Socket::ioctl(u32 id, u8 *buffer)
+u32 Socket::ioctl(u32, u8 *)
 {
   return NOT_DEFINED;
 }

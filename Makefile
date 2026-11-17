@@ -2,7 +2,7 @@ CROSS ?= i686-elf
 QEMU ?= qemu-system-i386
 RAM ?= 64M
 KERNEL = src/kernel/kernel.elf
-USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf,src/userland/sh.elf
+USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf,src/userland/sh.elf,src/userland/ls.elf
 comma := ,
 QEMU_ARGS = user $(if $(filter 1,$(USER_SHELL)),usershell) $(if $(DISK),disk=hda$(if $(filter 1,$(DISK_RW)),$(comma)rw)) $(if $(SWAP),swap=hdb)
 QEMU_HDA = -drive "file=$(DISK),format=raw,if=ide,index=0"

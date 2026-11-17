@@ -56,6 +56,21 @@ static void concurrent(void) {
     CHECK(parents == 50 && children == 50 && close(fd) == 0);
 }
 
+static void append_writes(void) {
+    const char *path = "/mnt/disk/append";
+    int first = open(path, O_CREAT | O_EXCL | O_RDWR | O_APPEND, 0644);
+    int second = open(path, O_WRONLY | O_APPEND);
+    CHECK(first >= 0 && second >= 0 && write(first, "a", 1) == 1);
+    CHECK(lseek(second, 100, SEEK_SET) == 100 && read(second, buffer, 1) == -9);
+    CHECK(write(second, "b", 1) == 1 && lseek(second, 0, SEEK_CUR) == 2);
+    int copy = dup(first);
+    CHECK(copy >= 0 && lseek(first, 0, SEEK_SET) == 0 && write(copy, "c", 1) == 1);
+    CHECK(lseek(first, 0, SEEK_CUR) == 3 && close(copy) == 0);
+    CHECK(ftruncate(first, 1) == 0 && write(second, "d", 1) == 1 && close(second) == 0);
+    CHECK(lseek(first, 0, SEEK_SET) == 0 && read(first, buffer, 3) == 2);
+    CHECK(buffer[0] == 'a' && buffer[1] == 'd' && close(first) == 0);
+}
+
 static void verify(int fd) {
     CHECK(lseek(fd, 0, SEEK_END) == (int)tail_offset + 4);
     CHECK(lseek(fd, 0, SEEK_SET) == 0);
@@ -121,6 +136,7 @@ int main(void) {
     fd = open("/mnt/disk/lost+found/nested", O_CREAT | O_EXCL | O_RDWR, 0644);
     CHECK(fd >= 0 && write(fd, "nested", 6) == 6 && close(fd) == 0);
     concurrent();
+    append_writes();
     CHECK(chdir("/mnt/disk") == 0);
     fd = open("mode-zero", O_CREAT | O_EXCL | O_RDWR, 0);
     CHECK(fd >= 0 && write(fd, "mode", 4) == 4 && close(fd) == 0 &&

@@ -2,7 +2,9 @@
 #define USER_H
 
 #include "../sdk/include/fcntl.h"
+#include "../sdk/include/dirent.h"
 #include "../sdk/include/signal.h"
+#include "../sdk/include/sys/stat.h"
 #include "../sdk/include/sys/wait.h"
 
 typedef unsigned int u32;
@@ -33,9 +35,13 @@ static inline int rmdir(const char *path) { return syscall3(40, (u32)path, 0, 0)
 static inline int unlink(const char *path) { return syscall3(17, (u32)path, 0, 0); }
 static inline int ftruncate(int fd, int size) { return syscall3(93, fd, size, 0); }
 static inline int lseek(int fd, int offset, int origin) { return syscall3(19, fd, offset, origin); }
+static inline int getdents(int fd, struct dirent *entries, u32 bytes) { return syscall3(89, fd, (u32)entries, bytes); }
+static inline int stat(const char *path, struct stat *result) { return syscall3(106, (u32)path, (u32)result, 0); }
+static inline int fstat(int fd, struct stat *result) { return syscall3(108, fd, (u32)result, 0); }
 static inline int close(int fd) { return syscall3(6, fd, 0, 0); }
 static inline int read(int fd, void *buffer, u32 count) { return syscall3(3, fd, (u32)buffer, count); }
 static inline int write(int fd, const void *buffer, u32 count) { return syscall3(4, fd, (u32)buffer, count); }
+static inline int dup(int fd) { return syscall3(41, fd, 0, 0); }
 static inline int dup2(int from, int to) { return syscall3(63, from, to, 0); }
 static inline int getpid(void) { return syscall3(20, 0, 0, 0); }
 static inline int getppid(void) { return syscall3(64, 0, 0, 0); }
@@ -53,7 +59,8 @@ static inline int sigaction(int signal, const struct sigaction *action, struct s
 }
 
 static inline int setpgid(int pid, int group) { return syscall3(57, pid, group, 0); }
-static inline int set_foreground(int group) { return syscall3(54, 0, 1, group); }
+static inline int set_terminal_group(int fd, int group) { return syscall3(54, fd, 1, group); }
+static inline int set_foreground(int group) { return set_terminal_group(0, group); }
 
 static inline void *sbrk(int increment) {
     u32 result = syscall3(45, increment, 0, 0);

@@ -13,7 +13,7 @@ enum
   SYS_open = 5,    //	(filename,flag)
   SYS_close = 6,   //	(fd)
   SYS_execve = 11, //	(filename,argv,envp )
-  SYS_dup = NOT_DEFINED,
+  SYS_dup = 41,
   SYS_dup2 = 63,
   SYS_pwrite = NOT_DEFINED,
   SYS_pread = NOT_DEFINED,
@@ -38,7 +38,7 @@ enum
   SYS_fcntl = NOT_DEFINED,
   SYS_get_system_time = NOT_DEFINED,
   SYS_stat = 106,
-  SYS_fstat = NOT_DEFINED,
+  SYS_fstat = 108,
   SYS_stime = NOT_DEFINED,
   SYS_mkdir = 15,
   SYS_ioctl = 54, //	(fd,adress,buffer)

@@ -22,7 +22,7 @@ User::User(char *n) : File(n, TYPE_FILE)
   memset(password, 0, sizeof(password));
 }
 
-u32 User::open(u32 flag)
+u32 User::open(u32)
 {
   return RETURN_OK;
 }
@@ -32,17 +32,17 @@ u32 User::close()
   return RETURN_OK;
 }
 
-u32 User::read(u8 *buffer, u32 size)
+u32 User::read(u8 *, u32)
 {
   return NOT_DEFINED;
 }
 
-u32 User::write(u8 *buffer, u32 size)
+u32 User::write(u8 *, u32)
 {
   return NOT_DEFINED;
 }
 
-u32 User::ioctl(u32 id, u8 *buffer)
+u32 User::ioctl(u32, u8 *)
 {
   return NOT_DEFINED;
 }

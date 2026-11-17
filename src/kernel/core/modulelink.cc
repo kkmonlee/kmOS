@@ -14,7 +14,7 @@ ModLink::~ModLink()
 
 }
 
-u32 ModLink::open(u32 flag)
+u32 ModLink::open(u32)
 {
   return RETURN_OK;
 }
@@ -24,17 +24,17 @@ u32 ModLink::close()
   return RETURN_OK;
 }
 
-u32 ModLink::read(u32 pos, u8 *buffer, u32 size)
+u32 ModLink::read(u32, u8 *, u32)
 {
   return NOT_DEFINED;
 }
 
-u32 ModLink::write(u32 pos, u8 *buffer, u32 size)
+u32 ModLink::write(u32, u8 *, u32)
 {
   return NOT_DEFINED;
 }
 
-u32 ModLink::ioctl(u32 id, u8 *buffer)
+u32 ModLink::ioctl(u32, u8 *)
 {
   return NOT_DEFINED;
 }

@@ -104,6 +104,8 @@ public:
     Ext2Node(const char* name, u8 type, Ext2Mount* mount, u32 inode);
     virtual ~Ext2Node();
     u32 close() override;
+    u32 getInode() const override { return inode_; }
+    int stat(struct stat &result) override;
 
     Ext2Mount* mount() const { return mount_; }
     u32 inode() const { return inode_; }
@@ -122,6 +124,7 @@ public:
     virtual ~Ext2Directory();
     bool load();
     void scan() override;
+    int readDirectory(u64 &position, struct dirent *entries, u32 count) override;
     int createFile(const char *name, u32 mode, File *&file) override;
     int unlinkFile(const char *name) override;
     int makeDirectory(const char *name, u32 mode) override;
@@ -142,7 +145,10 @@ public:
     u32 getSize() override;
     u32 read(u32 pos, u8* buffer, u32 size) override;
     u32 write(u32 pos, u8* buffer, u32 size) override;
+    u32 append(u8* buffer, u32 size, u32 &end) override;
 
+private:
+    u32 write_data(u32 pos, u8 *buffer, u32 size, u32 *append_end);
 };
 
 class Ext2Filesystem : public FilesystemDriver {
