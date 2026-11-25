@@ -20,12 +20,14 @@ void Syscalls::init()
   add(SYS_fstat, &call_fstat);
   add(SYS_ftruncate, &call_ftruncate);
   add(SYS_unlink, &call_unlink);
+  add(SYS_rename, &call_rename);
   add(SYS_mkdir, &call_mkdir);
   add(SYS_rmdir, &call_rmdir);
   add(SYS_read, &call_read);
   add(SYS_dup, &call_dup);
   add(SYS_dup2, &call_dup2);
   add(SYS_chdir, &call_chdir);
+  add(SYS_getcwd, &call_getcwd);
   add(SYS_getpid, &call_getpid);
   add(SYS_getppid, &call_getppid);
   add(SYS_sbrk, &call_sbrk);

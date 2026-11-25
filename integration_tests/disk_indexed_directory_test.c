@@ -11,6 +11,7 @@ int main(void) {
         CHECK(mkdir("mkdir/new", 0755) == 0);
         CHECK(unlink("unlink/old") == 0);
         CHECK(rmdir("rmdir/empty") == 0);
+        CHECK(rename("move-from/source", "move-to/destination") == 0);
         CHECK(rmdir("keep/busy") == -39);
         puts("indexed ext2 directories modified\n");
         return 0;
@@ -22,6 +23,9 @@ int main(void) {
     CHECK(fd >= 0 && read(fd, &byte, 1) == 1 && byte == 's' && close(fd) == 0);
     CHECK(chdir("mkdir/new") == 0 && chdir("../..") == 0);
     CHECK(open("unlink/old", O_RDONLY) == -2 && chdir("rmdir/empty") == -2);
+    CHECK(open("move-from/source", O_RDONLY) == -2);
+    fd = open("move-to/destination", O_RDONLY);
+    CHECK(fd >= 0 && read(fd, &byte, 1) == 1 && byte == 's' && close(fd) == 0);
     CHECK(mkdir("keep/new", 0755) == -30);
     puts("indexed ext2 directory changes verified after reboot\n");
     return 0;

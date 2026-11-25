@@ -156,6 +156,7 @@ public:
     Ext2Filesystem();
     virtual const char* name() const override;
     virtual File* mount(File* mount_point, BlockDevice* device, bool writable) override;
+    int rename(File &file, File &directory, const char *name) override;
 };
 
 extern Ext2Filesystem ext2_driver;

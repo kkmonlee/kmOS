@@ -33,6 +33,9 @@ static inline int open(const char *path, int flags, ...) {
 static inline int mkdir(const char *path, u32 mode) { return syscall3(15, (u32)path, mode, 0); }
 static inline int rmdir(const char *path) { return syscall3(40, (u32)path, 0, 0); }
 static inline int unlink(const char *path) { return syscall3(17, (u32)path, 0, 0); }
+static inline int rename(const char *source, const char *destination) {
+    return syscall3(38, (u32)source, (u32)destination, 0);
+}
 static inline int ftruncate(int fd, int size) { return syscall3(93, fd, size, 0); }
 static inline int lseek(int fd, int offset, int origin) { return syscall3(19, fd, offset, origin); }
 static inline int getdents(int fd, struct dirent *entries, u32 bytes) { return syscall3(89, fd, (u32)entries, bytes); }
@@ -46,6 +49,7 @@ static inline int dup2(int from, int to) { return syscall3(63, from, to, 0); }
 static inline int getpid(void) { return syscall3(20, 0, 0, 0); }
 static inline int getppid(void) { return syscall3(64, 0, 0, 0); }
 static inline int chdir(const char *path) { return syscall3(12, (u32)path, 0, 0); }
+static inline int getcwd(char *path, u32 size) { return syscall3(183, (u32)path, size, 0); }
 static inline int pipe(int fds[2]) { return syscall3(42, (u32)fds, 0, 0); }
 static inline int kill(int pid, int signal) { return syscall3(37, pid, signal, 0); }
 extern void __kmos_sigreturn(void);
@@ -88,10 +92,12 @@ static inline int write_all(int fd, const void *buffer, u32 count) {
     return 0;
 }
 
-static inline int puts(const char *text) {
+static inline int write_text(int fd, const char *text) {
     u32 count = 0;
     while (text[count]) ++count;
-    return write_all(1, text, count);
+    return write_all(fd, text, count);
 }
+
+static inline int puts(const char *text) { return write_text(1, text); }
 
 #endif

@@ -239,6 +239,20 @@ static void run_command(const Command *command) {
         }
         exit(puts("\n") != 0);
     }
+    if (equal(name, "pwd")) {
+        if (command->argc != 1) {
+            error("usage: pwd\n");
+            exit(2);
+        }
+        char path[4096];
+        int length = getcwd(path, sizeof(path));
+        if (length < 0) {
+            error("sh: cannot get current directory\n");
+            exit(1);
+        }
+        path[length - 1] = '\n';
+        exit(write_all(1, path, length) != 0);
+    }
 
     for (const char *c = name; *c; ++c) {
         if (*c == '/') {
@@ -472,7 +486,9 @@ static int run_builtin(Command *command, enum builtin builtin) {
         break;
     }
     case HELP:
-        puts("cd [dir], echo [text], kill pid, jobs, fg [%job], bg [%job], exit\n");
+        puts("cd [dir], pwd, echo [text], kill pid, jobs, fg [%job], bg [%job], exit\n");
+        puts("mkdir [-p] dir..., rmdir dir..., rm [-f] file...\n");
+        puts("cp source... destination, mv source... destination\n");
         break;
     case JOBS:
         reap_jobs();

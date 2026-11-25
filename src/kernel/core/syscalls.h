@@ -4,7 +4,7 @@
 #include <core/file.h>
 #include <runtime/list.h>
 
-#define NB_SYSCALLS 128
+#define NB_SYSCALLS 256
 
 typedef void (*syscall_handler)(void);
 

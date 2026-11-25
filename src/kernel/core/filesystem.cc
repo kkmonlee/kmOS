@@ -95,6 +95,58 @@ int Filesystem::unlink(const char *path) {
   return parent->unlinkFile(leaf);
 }
 
+int Filesystem::rename(const char *source, const char *destination) {
+  IRQGuard guard;
+  auto parent_of = [&](const char *name, char *leaf, int &error) -> File * {
+    if (!name || !*name) { error = -2; return nullptr; }
+    u32 end = strlen(name);
+    while (end && name[end - 1] == '/') --end;
+    if (!end) { error = -16; return nullptr; }
+    u32 start = end;
+    while (start && name[start - 1] != '/') --start;
+    if ((end - start == 1 && name[start] == '.') ||
+        (end - start == 2 && name[start] == '.' && name[start + 1] == '.')) {
+      error = -22;
+      return nullptr;
+    }
+    return resolve(name, leaf, File::kMaxNameLength + 1, true, &error);
+  };
+
+  int error;
+  char old_name[File::kMaxNameLength + 1], new_name[File::kMaxNameLength + 1];
+  File *from = parent_of(source, old_name, error);
+  if (!from) return error;
+  if (from->isRemoved()) return -2;
+  from->scan();
+  File *file = from->find(old_name);
+  if (!file) return -2;
+  bool directory = file->getType() == TYPE_DIRECTORY;
+  if (!directory && source[strlen(source) - 1] == '/') return -20;
+
+  File *to = parent_of(destination, new_name, error);
+  if (!to) return error;
+  if (to->isRemoved()) return -2;
+  to->scan();
+  File *target = to->find(new_name);
+  if (destination[strlen(destination) - 1] == '/' &&
+      (!directory || (target && target->getType() != TYPE_DIRECTORY))) return -20;
+  for (u32 i = 0; i < mount_count; ++i) {
+    if (mounts[i].mount_point == file || mounts[i].mount_point == target) return -16;
+  }
+
+  const MountInfo *mount = find_mount(from);
+  if (mount != find_mount(to)) return -18;
+  return mount ? mount->driver->rename(*file, *to, new_name) : -30;
+}
+
+const Filesystem::MountInfo *Filesystem::find_mount(File *file) const {
+  for (; file; file = file->getParent()) {
+    for (u32 i = 0; i < mount_count; ++i)
+      if (mounts[i].mount_point == file) return &mounts[i];
+  }
+  return nullptr;
+}
+
 int Filesystem::mkdir(const char *path, u32 mode) {
   IRQGuard guard;
   int error;
@@ -201,11 +253,13 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, i
   return fp;
 }
 
-bool Filesystem::get_path(File *file, char *buffer, u32 size)
+int Filesystem::get_path(File *file, char *buffer, u32 size)
 {
-  if (!buffer || !size) return false;
+  IRQGuard guard;
+  if (!buffer || !size) return -34;
   buffer[0] = '\0';
-  if (!file || !root || size < 2) return false;
+  if (!file || !root) return -2;
+  if (size < 2) return -34;
 
   u32 position = size - 1;
   buffer[position] = '\0';
@@ -214,13 +268,13 @@ bool Filesystem::get_path(File *file, char *buffer, u32 size)
     if (!file || file->isRemoved() || !file->getName())
     {
       buffer[0] = '\0';
-      return false;
+      return -2;
     }
     u32 length = strlen(file->getName());
     if (!length || length > File::kMaxNameLength || length + 1 > position)
     {
       buffer[0] = '\0';
-      return false;
+      return length + 1 > position ? -34 : -2;
     }
     position -= length;
     memcpy(buffer + position, file->getName(), length);
@@ -229,7 +283,7 @@ bool Filesystem::get_path(File *file, char *buffer, u32 size)
   }
   if (position == size - 1) buffer[--position] = '/';
   for (u32 i = position; i < size; ++i) buffer[i - position] = buffer[i];
-  return true;
+  return size - position;
 }
 
 File *Filesystem::pivot_root(File *targetdir)

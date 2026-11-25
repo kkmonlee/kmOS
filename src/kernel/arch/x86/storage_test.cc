@@ -316,9 +316,51 @@ bool verify_storage_removal() {
     return true;
 }
 
+static bool verify_rename_failures(TestDisk *disk) {
+    u32 writes_needed = 0;
+    for (u32 attempt = 0; attempt <= writes_needed; ++attempt) {
+        disk->reset(1024);
+        File *root = write_mount(disk);
+        File *file = nullptr;
+        CHECK(root && root->createFile("source", 0644, file) == 0);
+        CHECK(root->makeDirectory("destination", 0755) == 0);
+        File *directory = root->find("destination");
+        CHECK(directory);
+        u32 inode = file->getInode();
+        u32 destination_block = disk->inode(directory->getInode())->i_block[0];
+        u32 before = disk->writes;
+        if (attempt) disk->fail_write_after = before + attempt - 1;
+        int result = ext2_driver.rename(*file, *directory, "moved");
+        if (attempt) {
+            CHECK(result == -5 && root->find("source") == file && !directory->find("moved"));
+            auto has_inode = [&](u32 block) {
+                const u8 *data = disk->bytes + block * disk->block_size;
+                for (u32 offset = 0; offset < disk->block_size;) {
+                    auto *entry = (const ext2_dir_entry *)(data + offset);
+                    if (entry->inode == inode) return true;
+                    if (!entry->rec_len) return false;
+                    offset += entry->rec_len;
+                }
+                return false;
+            };
+            CHECK(has_inode(disk->root_block) || has_inode(destination_block));
+            u32 writes = disk->writes;
+            CHECK(ext2_driver.rename(*file, *directory, "moved") == -30 && disk->writes == writes);
+            CHECK(disk->super()->s_state == (attempt == 1 ? 1 : 0));
+        } else {
+            CHECK(result == 0 && !root->find("source") && directory->find("moved") == file);
+            writes_needed = disk->writes - before;
+            CHECK(writes_needed);
+        }
+        root->remove();
+    }
+    return true;
+}
+
 bool verify_storage_directories() {
     TestDisk *disk = new TestDisk();
     CHECK(disk);
+    CHECK(verify_rename_failures(disk));
     for (u32 operation = 0; operation < 3; ++operation) {
         disk->reset(1024);
         File *root = write_mount(disk);

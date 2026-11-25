@@ -21,10 +21,11 @@ public:
   File *path(const char *p, int *error = nullptr);
   int open(const char *path, u32 flags, u32 mode, File *&file);
   int unlink(const char *path);
+  int rename(const char *source, const char *destination);
   int mkdir(const char *path, u32 mode);
   int rmdir(const char *path);
   File *path_parent(const char *p, char *fname, u32 size, bool trailing = false);
-  bool get_path(File *file, char *buffer, u32 size);
+  int get_path(File *file, char *buffer, u32 size);
 
   u32 link(const char *fname, const char *newf);
   u32 addFile(const char *dir, File *fp);
@@ -45,6 +46,8 @@ private:
     BlockDevice *device;
     File *mount_point;
   };
+
+  const MountInfo *find_mount(File *file) const;
 
   static const u32 kMaxDrivers = 8;
   static const u32 kMaxMounts = 8;

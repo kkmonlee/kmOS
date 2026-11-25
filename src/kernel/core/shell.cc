@@ -271,7 +271,7 @@ int Shell::cmd_cd(int argc, char** argv) {
         return 1;
     }
     char path[MAX_PATH_LENGTH];
-    if (!fsm.get_path(dir, path, sizeof(path))) {
+    if (fsm.get_path(dir, path, sizeof(path)) < 0) {
         io.print("cd: path too long\n");
         return 1;
     }
@@ -601,7 +601,7 @@ void Shell::add_to_history(const char* command) {
 
 bool Shell::current_path(char *buffer, u32 size) {
     File *dir = arch.pcurrent ? arch.pcurrent->getCurrentDir() : fsm.getRoot();
-    return fsm.get_path(dir, buffer, size);
+    return fsm.get_path(dir, buffer, size) > 0;
 }
 
 void Shell::exit(int code) {

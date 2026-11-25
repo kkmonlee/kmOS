@@ -65,10 +65,10 @@ static bool paths(File *root, File *directory) {
     CHECK(small.guard == 0x12345678);
 
     char path[512];
-    CHECK(fsm.get_path(root, path, 2) && !strcmp(path, "/"));
-    CHECK(!fsm.get_path(root, path, 1));
-    CHECK(fsm.get_path(env, path, sizeof(path)) && !strcmp(path, "/sys/env"));
-    CHECK(!fsm.get_path(env, path, 4));
+    CHECK(fsm.get_path(root, path, 2) == sizeof("/") && !strcmp(path, "/"));
+    CHECK(fsm.get_path(root, path, 1) == -34);
+    CHECK(fsm.get_path(env, path, sizeof(path)) == sizeof("/sys/env") && !strcmp(path, "/sys/env"));
+    CHECK(fsm.get_path(env, path, 4) == -34);
 
     char name[File::kMaxNameLength + 2];
     for (u32 i = 0; i < File::kMaxNameLength; ++i) name[i] = 'n';
@@ -159,7 +159,7 @@ static bool navigation(File *root, File *directory) {
     CHECK(current && arch.pcurrent->setCurrentDir(current));
     CHECK(destination->addChild(current) == RETURN_OK);
     char moved_path[64];
-    CHECK(fsm.get_path(current, moved_path, sizeof(moved_path)));
+    CHECK(fsm.get_path(current, moved_path, sizeof(moved_path)) > 0);
     CHECK(!strcmp(moved_path, "/mnt/test/destination/current"));
     CHECK(command("cd", "..") == 0 && arch.pcurrent->getCurrentDir() == destination);
     CHECK(command("cd") == 0 && arch.pcurrent->getCurrentDir() == root);
@@ -173,7 +173,7 @@ static bool navigation(File *root, File *directory) {
         CHECK(deep);
     }
     char path[512];
-    CHECK(fsm.get_path(deep, path, sizeof(path)));
+    CHECK(fsm.get_path(deep, path, sizeof(path)) > 0);
     CHECK(command("cd", path) != 0 && arch.pcurrent->getCurrentDir() == root);
     CHECK(command("cd", "/sys") == 0 && command("cd") == 0);
     CHECK(arch.pcurrent->getCurrentDir() == root);
@@ -264,7 +264,7 @@ static bool memory_pressure() {
         CHECK(fsm.path("dev/../sys/./env") == fsm.path("/sys/env"));
         CHECK(!fsm.path("/missing/child"));
         CHECK(fsm.path_parent("/sys/env/new", leaf, sizeof(leaf)) == fsm.path("/sys/env"));
-        CHECK(fsm.get_path(fsm.path("/sys/env"), path, sizeof(path)));
+        CHECK(fsm.get_path(fsm.path("/sys/env"), path, sizeof(path)) > 0);
     }
     while (head) {
         void *ptr = head;

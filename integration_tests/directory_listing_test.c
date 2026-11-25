@@ -8,6 +8,10 @@ static int equal(const char *a, const char *b) {
 }
 
 int main(void) {
+    char path[64] = {'x', 'y'};
+    CHECK(getcwd(path, 0) == -22);
+    CHECK(getcwd(path, 1) == -34 && path[0] == 'x' && path[1] == 'y');
+    CHECK(getcwd(path, 2) == sizeof("/") && equal(path, "/"));
     struct stat info;
     struct dirent entries[20];
     CHECK(stat("/", &info) == 0 && S_ISDIR(info.st_mode));
@@ -23,6 +27,7 @@ int main(void) {
     CHECK(close(root) == 0);
 
     CHECK(chdir("/mnt/disk") == 0 && mkdir("sample", 0755) == 0 && chdir("sample") == 0);
+    CHECK(getcwd(path, sizeof(path)) == sizeof("/mnt/disk/sample") && equal(path, "/mnt/disk/sample"));
     int fd = open("notes with spaces", O_CREAT | O_RDWR, 0640);
     CHECK(fd >= 0 && write(fd, "abc", 3) == 3);
     CHECK(stat("notes with spaces", &info) == 0 && S_ISREG(info.st_mode));

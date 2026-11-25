@@ -153,7 +153,9 @@ def boot(args, ram, machine="pc"):
         if args.iso:
             assert all(value in vm.text() for value in ("Starting userland", "Hello from ring 3",
                                                       "kmOS userland", "[USER] Reaped init")), vm.text()
-            assert re.search(r"\bls\b", vm.serial_command("ls /bin").split("ls /bin\n")[-1]), vm.text()
+            listing = vm.serial_command("ls /bin").split("ls /bin\n")[-1]
+            for name in ("ls", "mkdir", "rmdir", "rm", "cp", "mv"):
+                assert re.search(rf"\b{name}\b", listing), listing
         registers = vm.monitor("info registers")
         cr0 = int(re.search(r"CR0=([0-9a-fA-F]+)", registers)[1], 16)
         assert cr0 & 0x80010000 == 0x80010000, registers
@@ -385,14 +387,17 @@ def user_shell(args, temp):
         shell_line_limit(vm, "sh$ ", "sh: line too long")
         for command, output in (
             ("echo 'hello | world' | cat|cat", "\nhello | world\n"),
+            ("pwd", "\n/\n"),
             ("cd /etc", ""),
+            ("pwd | cat", "\n/etc\n"),
             ("cat motd", "\nkmOS userland\n"),
             ("echo oops |", "sh: syntax error"),
         ):
-            prompts = vm.text().count("sh$ ")
+            previous = vm.text()
+            prompts = previous.count("sh$ ")
             vm.send_serial((command + "\n").encode())
             text = vm.wait(lambda text: text.count("sh$ ") > prompts)
-            assert output in text, text
+            assert output in text[len(previous):], text
         start = len(vm.text())
         vm.send_serial(b"cat | cat\n")
         vm.wait(lambda text: "cat | cat\n" in text[start:])
@@ -492,11 +497,12 @@ def shell_redirection(args, temp):
             command("cd /mnt/disk")
             if mode == "rw":
                 for line in ("echo discarded>note", "echo first >note", "echo second>>note",
-                             "cat<note|cat>'saved copy'", "help >manual", ">empty",
+                             "cat<note|cat>'saved copy'", "help >manual", "pwd >where", ">empty",
                              "echo last >unused >last", "cat missing 2>error"):
                     assert "sh: cannot redirect" not in command(line), line
                 assert "\nfirst\nsecond\n" in command("cat 'saved copy'")
-                assert "\ncd [dir], echo" in command("cat manual")
+                assert "\ncd [dir], pwd, echo" in command("cat manual")
+                assert "\n/mnt/disk\n" in command("cat where")
                 assert "\ncat: open failed\n" in command("cat error")
                 assert "\nlast\n" in command("cat last")
                 assert command("cat unused") == "cat unused\nsh$ "
@@ -522,6 +528,76 @@ def shell_redirection(args, temp):
         checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
         assert checked.returncode == 0, checked.stdout + checked.stderr
     print("PASS shell redirection, append, pipelines, builtins and read-only reboot", flush=True)
+
+
+def file_commands(args, temp):
+    disk = temp / "file-commands.img"
+    with disk.open("wb") as image:
+        image.truncate(8 * 1024 * 1024)
+    subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", str(disk)], check=True)
+    data = bytes(range(256)) * 33
+    payload = temp / "copy-payload"
+    payload.write_bytes(data)
+    seeded = subprocess.run(["debugfs", "-w", "-R", f"write {payload} /payload", str(disk)],
+                            capture_output=True, text=True)
+    assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+    permissions = subprocess.run(["debugfs", "-w", "-R", "set_inode_field /payload mode 0100600", str(disk)],
+                                 capture_output=True, text=True)
+    assert permissions.returncode == 0, permissions.stdout + permissions.stderr
+    userland = Path(__file__).resolve().parents[1] / "src/userland"
+    modules = ",".join(str(userland / f"{name}.elf") for name in ("cat", "sh", "ls", "mkdir", "rmdir", "rm", "cp", "mv"))
+    for mode in ("rw", "ro"):
+        mount = "disk=hda,rw" if mode == "rw" else "disk=hda"
+        with VM(args, f"file-commands-{mode}", append=f"user usershell {mount}", module=modules, disk=disk) as vm:
+            vm.wait(lambda text: "sh$ " in text)
+
+            def command(line):
+                start = len(vm.text())
+                vm.send_serial((line + "\n").encode())
+                return vm.wait(lambda text: "sh$ " in text[start:])[start:]
+
+            assert command("cd /mnt/disk") == "cd /mnt/disk\nsh$ "
+            if mode == "rw":
+                for line in ("mkdir -p /mnt/disk/tree//inner/nested/", "mkdir -p tree/inner/nested",
+                             "mkdir first second", "mkdir -- -empty", "echo data >-file",
+                             "mkdir -p saved/sub", "echo saved >saved/file",
+                             "echo stale contents >copy", "cp saved/file copy", "mv copy saved/sub",
+                             "cp payload saved/file saved/sub"):
+                    assert command(line) == line + "\nsh$ ", line
+                assert "\nnested\n" in command("ls tree/inner")
+                assert "cp: saved/file: source and destination are the same file" in command("cp saved/file saved/file")
+                assert "\nsaved\n" in command("cat saved/sub/copy")
+                assert "\n-rw------- 1 0 0 8448 saved/sub/payload\n" in command("ls -l saved/sub/payload")
+                assert "mv: saved/sub/copy: cross-filesystem move" in command("mv saved/sub/copy /sys/env/copy")
+                assert "ls: cannot stat: copy" in command("ls copy")
+                assert "mkdir: saved/file/child: not a directory" in command("mkdir -p saved/file/child")
+                assert "mkdir: first: already exists" in command("mkdir first")
+                assert "rm: tree: is a directory" in command("rm tree")
+                assert "rmdir: tree: directory not empty" in command("rmdir tree")
+                assert "rmdir: missing: no such file or directory" in command("rmdir missing first second")
+                assert "rm: missing: no such file or directory" in command("rm -- missing -file")
+                for line in ("rm -f -- missing -file", "rmdir -- -empty",
+                             "rmdir tree/inner/nested tree/inner tree"):
+                    assert command(line) == line + "\nsh$ ", line
+                for path in ("-file", "first", "second", "tree"):
+                    assert f"ls: cannot stat: {path}" in command(f"ls -- {path}")
+            else:
+                for line in ("mkdir -p saved/sub", "rm -f missing"):
+                    assert command(line) == line + "\nsh$ ", line
+                assert "mkdir: denied: read-only filesystem" in command("mkdir denied")
+                assert "rmdir: saved/sub: read-only filesystem" in command("rmdir saved/sub")
+                assert "rm: saved/file: read-only filesystem" in command("rm -f saved/file")
+                assert "mv: saved/file: read-only filesystem" in command("mv saved/file denied")
+                assert "cp: denied: read-only filesystem" in command("cp saved/file denied")
+                assert "\nsaved\n" in command("cat saved/file")
+            vm.send_serial(b"exit\n")
+            text = vm.wait(lambda text: "kmOS:/$ " in text)
+            assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
+    checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    copied = subprocess.run(["debugfs", "-R", "cat /saved/sub/payload", str(disk)], capture_output=True)
+    assert copied.returncode == 0 and copied.stdout == data, copied.stderr
+    print("PASS userspace mkdir, rmdir, rm, cp and mv on writable and read-only ext2", flush=True)
 
 
 def directory_listing(args, temp):
@@ -812,7 +888,9 @@ def disk_directories(args, temp):
                 image.seek(1024 + 84)
                 image.write(bytes(1024 - 84))
         commands = temp / "directory-fixture"
-        commands.write_text("mkdir /has-link\nsymlink /has-link/unknown target\n")
+        commands.write_text("mkdir /has-link\nsymlink /has-link/unknown target\n"
+                            "write /dev/null /rename-link\nlink /rename-link /rename-alias\n"
+                            "set_inode_field /rename-link links_count 2\n")
         seeded = subprocess.run(["debugfs", "-w", "-f", str(commands), str(disk)], capture_output=True, text=True)
         assert seeded.returncode == 0, seeded.stdout + seeded.stderr
         for mode, marker in (("rw", "mkdir, rmdir and removed working directories verified"),
@@ -859,7 +937,7 @@ def disk_indexed_directories(args, temp):
     made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", "1024", "-I", "128",
                            "-O", "dir_index,^resize_inode", str(disk)], capture_output=True, text=True)
     assert made.returncode == 0, made.stdout + made.stderr
-    directories = ("create", "mkdir", "unlink", "rmdir", "keep")
+    directories = ("create", "mkdir", "unlink", "rmdir", "move-from", "move-to", "keep")
     commands = temp / "indexed-directory-fixture"
     payload = temp / "indexed-directory-payload"
     payload.write_bytes(b"s")
@@ -867,7 +945,8 @@ def disk_indexed_directories(args, temp):
     seed.extend(f"write /dev/null /{name}/entry-{i:03d}-long-enough-for-multiple-directory-blocks"
                 for name in directories for i in range(96))
     seed.extend([f"write {payload} /create/original", "write /dev/null /unlink/old",
-                 "mkdir /rmdir/empty", "mkdir /keep/busy", "write /dev/null /keep/busy/file"])
+                 "mkdir /rmdir/empty", f"write {payload} /move-from/source",
+                 "mkdir /keep/busy", "write /dev/null /keep/busy/file"])
     commands.write_text("\n".join(seed) + "\n")
     seeded = subprocess.run(["debugfs", "-w", "-f", str(commands), str(disk)], capture_output=True, text=True)
     assert seeded.returncode == 0, seeded.stdout + seeded.stderr
@@ -1224,6 +1303,7 @@ def main():
         user_signals(args, Path(temp))
         user_shell(args, Path(temp))
         shell_redirection(args, Path(temp))
+        file_commands(args, Path(temp))
         directory_listing(args, Path(temp))
     boot(args, 64, "q35")
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")

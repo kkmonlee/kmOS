@@ -45,6 +45,19 @@ void call_unlink() {
   arch.setRet(result ? result : fsm.unlink(path));
 }
 
+void call_rename() {
+  char *paths = (char *)kmalloc(2 * Filesystem::kMaxPathLength);
+  if (!paths) { arch.setRet((u32)-12); return; }
+  char *destination = paths + Filesystem::kMaxPathLength;
+  page_directory *pd = arch.pcurrent->getPInfo()->pd;
+  int error = vmm.user_string(pd, arch.getArg(0), paths, Filesystem::kMaxPathLength);
+  if (!error) error = vmm.user_string(pd, arch.getArg(1), destination, Filesystem::kMaxPathLength);
+  int result = error ? error : fsm.rename(paths, destination);
+  kfree(paths);
+  if (bad_pointer(error != -14)) return;
+  arch.setRet(result);
+}
+
 void call_ftruncate() {
   Process *process = arch.pcurrent;
   File *file = process->getFile(arch.getArg(0));
@@ -263,6 +276,22 @@ void call_chdir() {
   int error;
   File *file = fsm.path(path, &error);
   arch.setRet(!file ? error : (process->setCurrentDir(file) ? 0 : -20));
+}
+
+void call_getcwd() {
+  u32 address = arch.getArg(0), size = arch.getArg(1);
+  if (!size) { arch.setRet((u32)-22); return; }
+  Process *process = arch.pcurrent;
+  char path[Filesystem::kMaxPathLength];
+  int length = fsm.get_path(process->getCurrentDir(), path, sizeof(path));
+  if (length < 0) { arch.setRet(length == -34 ? -36 : length); return; }
+  if ((u32)length > size) { arch.setRet((u32)-34); return; }
+  int error;
+  if (!vmm.copy_to_user(process->getPInfo()->pd, address, path, length, &error)) {
+    if (!bad_pointer(error != -14)) arch.setRet(error);
+    return;
+  }
+  arch.setRet(length);
 }
 
 struct ExecArguments {
