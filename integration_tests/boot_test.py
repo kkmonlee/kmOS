@@ -709,7 +709,7 @@ def disk_growth(args, temp):
         assert "[STORAGE] Allocation rollback and write failures verified" in text, text
     print("PASS ext2 allocation rollback and failures during creation and growth", flush=True)
 
-    for tool in ("mke2fs", "e2fsck"):
+    for tool in ("mke2fs", "e2fsck", "debugfs"):
         assert shutil.which(tool), f"{tool} is missing; install e2fsprogs"
     program = build_user_test(args, temp, "disk_growth_test.c", "init")
     for name, block_size, options in (
@@ -732,6 +732,13 @@ def disk_growth(args, temp):
                 image.write(struct.pack("<I", 0))
                 image.seek(1024 + 84)
                 image.write(bytes(1024 - 84))
+        payload = temp / "ext2 host indirect"
+        with payload.open("wb") as source:
+            source.seek((12 + block_size // 4) * block_size + 3)
+            source.write(b"host")
+        seeded = subprocess.run(["debugfs", "-w", "-R", f'write "{payload}" /host-indirect', str(disk)],
+                                capture_output=True, text=True)
+        assert seeded.returncode == 0 and "Allocated inode:" in seeded.stdout, seeded.stdout + seeded.stderr
         for mode, marker in (("rw", "file creation, growth and sparse writes verified"),
                              ("ro", "created files verified after reboot")):
             argument = "disk=hda,rw" if mode == "rw" else "disk=hda"
@@ -742,7 +749,7 @@ def disk_growth(args, temp):
                 assert "[USER] Reaped init" in text and "Frame leak" not in text and "[PANIC]" not in text, text
             checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
             assert checked.returncode == 0, checked.stdout + checked.stderr
-        print(f"PASS ext2 creation, growth, sparse writes, reboot and fsck: {name}", flush=True)
+        print(f"PASS ext2 creation, doubly indirect and sparse writes, reboot and fsck: {name}", flush=True)
 
     for name, size, source, marker, counter in (
         ("blocks", 64 * 1024, "disk_full_test.c", "full disk data verified", 12),

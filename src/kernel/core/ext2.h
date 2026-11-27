@@ -149,6 +149,7 @@ public:
 
 private:
     u32 write_data(u32 pos, u8 *buffer, u32 size, u32 *append_end);
+    bool blocks_validated_ = false;
 };
 
 class Ext2Filesystem : public FilesystemDriver {

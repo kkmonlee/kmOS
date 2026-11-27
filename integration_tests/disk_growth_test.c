@@ -89,6 +89,57 @@ static void verify(int fd) {
     CHECK(lseek(fd, 0, 3) == -22 && lseek(1, 0, SEEK_SET) == -29);
 }
 
+static void large_files(int readonly) {
+    struct stat info;
+    CHECK(stat("/mnt/disk", &info) == 0);
+    u32 block = info.st_blksize;
+    u32 pointers = block / 4;
+    int first = (12 + pointers) * block;
+    int second = first + pointers * block;
+    const char *path = "/mnt/disk/double-indirect";
+    int fd = readonly ? open(path, O_RDONLY) : open(path, O_CREAT | O_EXCL | O_RDWR, 0644);
+    CHECK(fd >= 0);
+    if (!readonly) {
+        CHECK(ftruncate(fd, second + 39) == 0);
+        CHECK(lseek(fd, first - 2, SEEK_SET) == first - 2 && write(fd, "abcd", 4) == 4);
+        CHECK(lseek(fd, second + 11, SEEK_SET) == second + 11 && write(fd, "edge", 4) == 4);
+        CHECK(fstat(fd, &info) == 0 && info.st_blocks == 7 * (block / 512));
+        CHECK(ftruncate(fd, first + 1) == 0);
+        CHECK(fstat(fd, &info) == 0 && info.st_blocks == 5 * (block / 512));
+        CHECK(ftruncate(fd, second + 39) == 0);
+        CHECK(lseek(fd, second + 11, SEEK_SET) == second + 11 && read(fd, buffer, 4) == 4);
+        CHECK(!buffer[0] && !buffer[1] && !buffer[2] && !buffer[3]);
+        CHECK(lseek(fd, second + 11, SEEK_SET) == second + 11 && write(fd, "tail", 4) == 4);
+    }
+    CHECK(fstat(fd, &info) == 0 && info.st_blocks == 7 * (block / 512));
+    CHECK(lseek(fd, 0, SEEK_END) == second + 39);
+    CHECK(lseek(fd, first - 3, SEEK_SET) == first - 3 && read(fd, buffer, 6) == 6);
+    CHECK(!buffer[0] && buffer[1] == 'a' && buffer[2] == 'b' && buffer[3] == 'c' && !buffer[4] && !buffer[5]);
+    CHECK(lseek(fd, second + 10, SEEK_SET) == second + 10 && read(fd, buffer, 6) == 6);
+    CHECK(!buffer[0] && buffer[1] == 't' && buffer[2] == 'a' && buffer[3] == 'i' && buffer[4] == 'l' && !buffer[5]);
+    CHECK(close(fd) == 0);
+
+    path = "/mnt/disk/host-indirect";
+    fd = readonly ? open(path, O_RDONLY) : open(path, O_RDWR | O_APPEND);
+    CHECK(fd >= 0);
+    CHECK(lseek(fd, first + 3, SEEK_SET) == first + 3 && read(fd, buffer, 4) == 4);
+    CHECK(buffer[0] == 'h' && buffer[1] == 'o' && buffer[2] == 's' && buffer[3] == 't');
+    if (!readonly) CHECK(write(fd, "!", 1) == 1 && lseek(fd, first + 7, SEEK_SET) == first + 7);
+    CHECK(read(fd, buffer, 1) == 1 && buffer[0] == '!' && close(fd) == 0);
+    if (readonly) return;
+
+    path = "/mnt/disk/large-orphan";
+    fd = open(path, O_CREAT | O_EXCL | O_RDWR, 0644);
+    int limit = block == 4096 ? 0x7fffffff : (12 + pointers + pointers * pointers) * block;
+    CHECK(fd >= 0 && ftruncate(fd, limit) == 0);
+    CHECK(lseek(fd, limit - 1, SEEK_SET) == limit - 1 && write(fd, "z", 1) == 1);
+    CHECK(write(fd, "z", 1) == -27);
+    CHECK(fstat(fd, &info) == 0 && info.st_blocks == 3 * (block / 512));
+    CHECK(unlink(path) == 0 && fstat(fd, &info) == 0 && info.st_nlink == 0);
+    CHECK(lseek(fd, limit - 1, SEEK_SET) == limit - 1 && read(fd, buffer, 1) == 1 && buffer[0] == 'z');
+    CHECK(close(fd) == 0);
+}
+
 int main(void) {
     char maximum[266];
     maximum_name(maximum);
@@ -99,6 +150,7 @@ int main(void) {
         CHECK(fd >= 0);
         verify(fd);
         CHECK(close(fd) == 0);
+        large_files(1);
         for (int i = 0; i < 70; ++i) {
             char path[64];
             path_for(i, path);
@@ -124,6 +176,7 @@ int main(void) {
     CHECK(lseek(fd, tail_offset, SEEK_SET) == (int)tail_offset && write(fd, "tail", 4) == 4);
     verify(fd);
     CHECK(close(fd) == 0);
+    large_files(0);
 
     for (int i = 0; i < 70; ++i) {
         char path[64];

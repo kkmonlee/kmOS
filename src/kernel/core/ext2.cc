@@ -30,6 +30,32 @@ static constexpr u32 EXT2_INDEX = 0x1000;
 static constexpr u16 EXT2_MODE_TYPE = 0xf000;
 static constexpr u16 EXT2_MODE_FILE = 0x8000;
 static constexpr u16 EXT2_MODE_DIR = 0x4000;
+static constexpr u32 EXT2_DIRECT_BLOCKS = 12;
+static constexpr u32 EXT2_SINGLE_INDIRECT = 12;
+static constexpr u32 EXT2_DOUBLE_INDIRECT = 13;
+static constexpr u32 EXT2_TRIPLE_INDIRECT = 14;
+
+struct Ext2BlockPath {
+    u32 root;
+    u32 depth;
+    u32 offsets[2];
+};
+
+static bool block_path(u32 index, u32 pointers, Ext2BlockPath &path) {
+    if (index < EXT2_DIRECT_BLOCKS) {
+        path = {index, 0, {}};
+        return true;
+    }
+    index -= EXT2_DIRECT_BLOCKS;
+    if (index < pointers) {
+        path = {EXT2_SINGLE_INDIRECT, 1, {index}};
+        return true;
+    }
+    index -= pointers;
+    if (index >= pointers * pointers) return false;
+    path = {EXT2_DOUBLE_INDIRECT, 2, {index / pointers, index % pointers}};
+    return true;
+}
 
 static bool valid_directory_entry(const ext2_dir_entry *entry, u32 available) {
     return available >= sizeof(*entry) && entry->rec_len >= sizeof(*entry) &&
@@ -176,20 +202,27 @@ public:
             device_->read(block * block_size_, (u8 *)buffer, block_size_) == RETURN_OK;
     }
 
+    u32 file_size_limit(const ext2_inode &inode) const {
+        u32 count = EXT2_DIRECT_BLOCKS + ptrs_per_block_;
+        if ((inode.i_mode & EXT2_MODE_TYPE) != EXT2_MODE_DIR) count += ptrs_per_block_ * ptrs_per_block_;
+        u64 bytes = (u64)count * block_size_;
+        return bytes > 0x7fffffffU ? 0x7fffffffU : (u32)bytes;
+    }
+
     bool get_block(const ext2_inode &inode, u32 index, u32 &block) {
-        if (index < 12) block = inode.i_block[index];
-        else {
-            index -= 12;
-            if (index >= ptrs_per_block_) return false;
-            if (!inode.i_block[12]) { block = 0; return true; }
-            u32 *entries = (u32 *)kmalloc(block_size_);
-            if (!entries) return false;
-            bool valid = read_block(inode.i_block[12], entries);
-            if (valid) block = entries[index];
-            kfree(entries);
-            if (!valid) return false;
+        Ext2BlockPath path;
+        if (!block_path(index, ptrs_per_block_, path)) return false;
+        block = inode.i_block[path.root];
+        u32 parent = 0;
+        for (u32 level = 0; block && level < path.depth; ++level) {
+            if (!data_block(block) || block == inode.i_file_acl || block == parent) return false;
+            parent = block;
+            u32 position = block * block_size_ + path.offsets[level] * sizeof(u32);
+            if (device_->read(position, (u8 *)&block, sizeof(block)) != RETURN_OK) return false;
         }
-        return block < super_.s_blocks_count;
+        return !block || (data_block(block) && block != inode.i_file_acl && block != parent &&
+            block != inode.i_block[EXT2_SINGLE_INDIRECT] && block != inode.i_block[EXT2_DOUBLE_INDIRECT] &&
+            block != inode.i_block[EXT2_TRIPLE_INDIRECT]);
     }
 
     u32 read_file_data(const ext2_inode &inode, u32 offset, u8 *buffer, u32 size) {
@@ -224,7 +257,7 @@ public:
         return 0;
     }
 
-    u32 write_file_data(u32 number, const ext2_inode &inode, u32 offset, u8 *buffer, u32 size);
+    u32 write_file_data(u32 number, const ext2_inode &inode, u32 offset, u8 *buffer, u32 size, bool &validated);
     int create_node(Ext2Directory *dir, const char *name, u32 mode, bool directory, File *&file);
     int truncate_file(u32 number, u32 size);
     int remove_node(Ext2Directory *dir, const char *name, bool directory);
@@ -520,49 +553,72 @@ public:
         if (slot) memcpy(slot, &inode, sizeof(inode));
     }
 
-    u32 file_block(ext2_inode &inode, u32 index, u32 preferred_group) {
-        if (index >= 12 + mount_.ptrs_per_block_) { fail(-27); return 0; }
+    u32 file_block(ext2_inode &inode, u32 index, u32 preferred_group, bool create = true) {
         u32 sectors = mount_.block_size_ / 512;
-        if (inode.i_blocks > 0xffffffffU - 2 * sectors) { fail(-5); return 0; }
-        u32 *entries = nullptr;
-        if (inode.i_block[12]) {
-            if (!allocated_block(inode.i_block[12]) || inode.i_block[12] == inode.i_file_acl) {
-                fail(-5);
-                return 0;
-            }
-            for (u32 i = 0; i < 12; ++i)
-                if (inode.i_block[i] == inode.i_block[12]) { fail(-5); return 0; }
-            entries = (u32 *)block(inode.i_block[12]);
-            if (!entries) return 0;
-        }
-        if (index >= 12 && !entries) {
-            inode.i_block[12] = allocate_block(preferred_group);
-            if (!inode.i_block[12]) return 0;
-            inode.i_blocks += sectors;
-            entries = (u32 *)block(inode.i_block[12]);
-            if (!entries) return 0;
-        }
-        u32 number = index < 12 ? inode.i_block[index] : entries[index - 12];
-        if (!number) {
-            number = allocate_block(preferred_group);
-            if (!number) return 0;
-            if (index < 12) inode.i_block[index] = number;
-            else {
-                if (!block(inode.i_block[12], Write)) return 0;
-                entries[index - 12] = number;
-            }
-            inode.i_blocks += sectors;
-        }
-        if (!allocated_block(number) || number == inode.i_file_acl || number == inode.i_block[12] ||
-            number == inode.i_block[13] || number == inode.i_block[14]) {
+        if (inode.i_blocks > super_.s_blocks_count * sectors || inode.i_blocks % sectors) {
             fail(-5);
             return 0;
         }
-        for (u32 i = 0; i < 12; ++i)
-            if (i != index && inode.i_block[i] == number) { fail(-5); return 0; }
-        if (entries) {
-            for (u32 i = 0; i < mount_.ptrs_per_block_; ++i)
-                if (i + 12 != index && entries[i] == number) { fail(-5); return 0; }
+        Ext2BlockPath path;
+        u32 pointers = mount_.ptrs_per_block_;
+        if (!block_path(index, pointers, path) ||
+            (path.depth == 2 && (inode.i_mode & EXT2_MODE_TYPE) == EXT2_MODE_DIR)) {
+            fail(-27);
+            return 0;
+        }
+        if (path.depth && !inode.i_block[path.root]) {
+            if (!create) return 0;
+            inode.i_block[path.root] = allocate_file_block(inode, preferred_group);
+            if (!inode.i_block[path.root]) return 0;
+        }
+
+        u32 *single = indirect_block(inode, EXT2_SINGLE_INDIRECT);
+        u32 *doubly = indirect_block(inode, EXT2_DOUBLE_INDIRECT);
+        if (error_) return 0;
+        if (contains_block(single, inode.i_block[EXT2_DOUBLE_INDIRECT]) ||
+            contains_block(doubly, inode.i_block[EXT2_SINGLE_INDIRECT])) {
+            fail(-5);
+            return 0;
+        }
+        u32 table = inode.i_block[path.root];
+        u32 *entries = single;
+        if (path.depth == 2) {
+            u32 branch = path.offsets[0];
+            table = doubly[branch];
+            if (!table) {
+                if (!create) return 0;
+                table = allocate_file_block(inode, preferred_group);
+                if (!table || !block(inode.i_block[EXT2_DOUBLE_INDIRECT], Write)) return 0;
+                doubly[branch] = table;
+            }
+            if (!unique_inode_block(inode, table) || contains_block(single, table) ||
+                contains_block(doubly, table, branch)) {
+                fail(-5);
+                return 0;
+            }
+            entries = (u32 *)block(table);
+            if (!entries) return 0;
+        }
+
+        u32 slot = path.depth ? path.offsets[path.depth - 1] : path.root;
+        u32 number = path.depth ? entries[slot] : inode.i_block[slot];
+        if (!number) {
+            if (!create) return 0;
+            number = allocate_file_block(inode, preferred_group);
+            if (!number) return 0;
+            if (path.depth) {
+                if (!block(table, Write)) return 0;
+                entries[slot] = number;
+            } else {
+                inode.i_block[slot] = number;
+            }
+        }
+        if (!unique_inode_block(inode, number, path.depth ? ~0U : slot) ||
+            contains_block(single, number, path.depth == 1 ? slot : ~0U) ||
+            contains_block(doubly, number) ||
+            (path.depth == 2 && contains_block(entries, number, slot))) {
+            fail(-5);
+            return 0;
         }
         return number;
     }
@@ -592,81 +648,24 @@ public:
     }
 
     void truncate_inode(ext2_inode &inode, u32 size) {
-        u32 count = 12 + mount_.ptrs_per_block_;
-        if (size > count * mount_.block_size_) { fail(-27); return; }
-        if (inode.i_block[13] || inode.i_block[14] || inode.i_faddr) { fail(-95); return; }
-        u32 *entries = nullptr;
-        u32 allocated = 0;
-        if (inode.i_file_acl) {
-            if (!allocated_block(inode.i_file_acl)) return;
-            ++allocated;
+        if (size > mount_.file_size_limit(inode)) { fail(-27); return; }
+        if (inode.i_block[EXT2_TRIPLE_INDIRECT] || inode.i_faddr ||
+            (inode.i_block[EXT2_DOUBLE_INDIRECT] && (inode.i_mode & EXT2_MODE_TYPE) == EXT2_MODE_DIR)) {
+            fail(-95);
+            return;
         }
-        if (inode.i_block[12]) {
-            if (inode.i_block[12] == inode.i_file_acl || !allocated_block(inode.i_block[12])) {
-                fail(-5);
-                return;
-            }
-            entries = (u32 *)block(inode.i_block[12]);
-            if (!entries) return;
-            ++allocated;
+        u32 block_size = mount_.block_size_;
+        u32 keep = (size + block_size - 1) / block_size;
+        bool shrinking = size < inode.i_size;
+        Truncation trim{keep, shrinking ? size : inode.i_size, shrinking ? keep * block_size : size};
+        if (walk_inode(inode, &trim)) {
+            inode.i_blocks -= trim.released * (block_size / 512);
+            inode.i_size = size;
         }
+    }
 
-        u32 blocks[12 + 1024];
-        for (u32 i = 0; i < count; ++i) {
-            u32 number = i < 12 ? inode.i_block[i] : (entries ? entries[i - 12] : 0);
-            blocks[i] = number;
-            if (!number) continue;
-            if (number == inode.i_block[12] || number == inode.i_file_acl || !allocated_block(number)) {
-                fail(-5);
-                return;
-            }
-            for (u32 j = 0; j < i; ++j)
-                if (blocks[j] == number) { fail(-5); return; }
-            ++allocated;
-        }
-        u32 sectors = mount_.block_size_ / 512;
-        if (inode.i_blocks != allocated * sectors) { fail(-5); return; }
-
-        u32 keep = (size + mount_.block_size_ - 1) / mount_.block_size_;
-        bool keep_indirect = false;
-        for (u32 i = 0; i < count; ++i) {
-            if (!blocks[i]) continue;
-            if (i < keep) {
-                if (i >= 12) keep_indirect = true;
-                continue;
-            }
-            free_block(blocks[i]);
-            if (error_) return;
-            inode.i_blocks -= sectors;
-            if (i < 12) inode.i_block[i] = 0;
-            else {
-                if (!block(inode.i_block[12], Write)) return;
-                entries[i - 12] = 0;
-            }
-        }
-        if (inode.i_block[12] && !keep_indirect) {
-            free_block(inode.i_block[12]);
-            if (error_) return;
-            inode.i_block[12] = 0;
-            inode.i_blocks -= sectors;
-        }
-
-        u32 begin = size < inode.i_size ? size : inode.i_size;
-        u32 end = size < inode.i_size
-            ? ((size + mount_.block_size_ - 1) / mount_.block_size_) * mount_.block_size_ : size;
-        for (u32 offset = begin; offset < end;) {
-            u32 index = offset / mount_.block_size_;
-            u32 within = offset % mount_.block_size_;
-            u32 bytes = mount_.block_size_ - within;
-            if (bytes > end - offset) bytes = end - offset;
-            if (index < keep && blocks[index]) {
-                u8 *data = block(blocks[index], Write);
-                if (!data) return;
-                memset(data + within, 0, bytes);
-            }
-            offset += bytes;
-        }
-        inode.i_size = size;
+    bool validate_blocks(ext2_inode &inode) {
+        return walk_inode(inode, nullptr);
     }
 
     void orphan_inode(u32 number, ext2_inode &inode) {
@@ -794,6 +793,136 @@ public:
     }
 
 private:
+    struct Truncation {
+        u32 keep;
+        u32 zero_begin;
+        u32 zero_end;
+        u32 released = 0;
+    };
+
+    struct BlockVisits {
+        struct Group {
+            u32 index;
+            Group *next;
+            u8 bits[];
+        };
+
+        Group *groups = nullptr;
+        u32 allocated = 0;
+
+        ~BlockVisits() {
+            while (groups) {
+                Group *next = groups->next;
+                kfree(groups);
+                groups = next;
+            }
+        }
+    };
+
+    bool contains_block(const u32 *entries, u32 number, u32 skip = ~0U) const {
+        if (!entries || !number) return false;
+        for (u32 i = 0; i < mount_.ptrs_per_block_; ++i)
+            if (i != skip && entries[i] == number) return true;
+        return false;
+    }
+
+    bool unique_inode_block(const ext2_inode &inode, u32 number, u32 skip = ~0U) {
+        if (number == inode.i_file_acl || !allocated_block(number)) return false;
+        for (u32 i = 0; i < EXT2_TRIPLE_INDIRECT + 1; ++i)
+            if (i != skip && inode.i_block[i] == number) return false;
+        return true;
+    }
+
+    u32 *indirect_block(const ext2_inode &inode, u32 index) {
+        u32 number = inode.i_block[index];
+        if (!number) return nullptr;
+        if (!unique_inode_block(inode, number, index)) { fail(-5); return nullptr; }
+        return (u32 *)block(number);
+    }
+
+    u32 allocate_file_block(ext2_inode &inode, u32 group) {
+        u32 sectors = mount_.block_size_ / 512;
+        if (inode.i_blocks > 0xffffffffU - sectors) { fail(-5); return 0; }
+        u32 number = allocate_block(group);
+        if (number) inode.i_blocks += sectors;
+        return number;
+    }
+
+    bool visit_block(u32 number, BlockVisits &visits) {
+        if (!allocated_block(number)) return false;
+        u32 relative = number - super_.s_first_data_block;
+        u32 index = relative / super_.s_blocks_per_group;
+        u32 bit = relative % super_.s_blocks_per_group;
+        BlockVisits::Group *group = visits.groups;
+        while (group && group->index != index) group = group->next;
+        if (!group) {
+            group = (BlockVisits::Group *)kcalloc(1, sizeof(*group) + (super_.s_blocks_per_group + 7) / 8);
+            if (!group) { fail(-12); return false; }
+            group->index = index;
+            group->next = visits.groups;
+            visits.groups = group;
+        }
+        u8 &bits = group->bits[bit / 8];
+        u8 mask = 1U << (bit % 8);
+        if (bits & mask) { fail(-5); return false; }
+        bits |= mask;
+        ++visits.allocated;
+        return true;
+    }
+
+    bool walk_inode(ext2_inode &inode, Truncation *trim) {
+        BlockVisits visits;
+        if (inode.i_file_acl) visit_block(inode.i_file_acl, visits);
+        for (u32 i = 0; i < EXT2_DIRECT_BLOCKS && !error_; ++i)
+            inode.i_block[i] = walk_block(inode.i_block[i], i, 0, visits, trim);
+        if (!error_)
+            inode.i_block[EXT2_SINGLE_INDIRECT] =
+                walk_block(inode.i_block[EXT2_SINGLE_INDIRECT], EXT2_DIRECT_BLOCKS, 1, visits, trim);
+        if (!error_)
+            inode.i_block[EXT2_DOUBLE_INDIRECT] = walk_block(inode.i_block[EXT2_DOUBLE_INDIRECT],
+                EXT2_DIRECT_BLOCKS + mount_.ptrs_per_block_, 2, visits, trim);
+        if (inode.i_blocks != visits.allocated * (mount_.block_size_ / 512)) fail(-5);
+        return !error_;
+    }
+
+    u32 walk_block(u32 number, u32 index, u32 depth, BlockVisits &visits, Truncation *trim) {
+        if (!number || !visit_block(number, visits)) return 0;
+        if (depth) {
+            u32 *entries = (u32 *)block(number);
+            if (!entries) return 0;
+            u32 span = depth == 2 ? mount_.ptrs_per_block_ : 1;
+            bool kept = false, changed = false;
+            for (u32 i = 0; i < mount_.ptrs_per_block_; ++i) {
+                if (!entries[i]) continue;
+                u32 child = walk_block(entries[i], index + i * span, depth - 1, visits, trim);
+                if (error_) return 0;
+                kept |= child != 0;
+                changed |= child != entries[i];
+                entries[i] = child;
+            }
+            if (!trim || kept) {
+                if (changed && !block(number, Write)) return 0;
+                return number;
+            }
+        } else if (!trim) {
+            return number;
+        } else if (index < trim->keep) {
+            u32 offset = index * mount_.block_size_;
+            u32 begin = trim->zero_begin > offset ? trim->zero_begin : offset;
+            u32 end = offset + mount_.block_size_;
+            if (trim->zero_end < end) end = trim->zero_end;
+            if (begin < end) {
+                u8 *data = block(number, Write);
+                if (!data) return 0;
+                memset(data + begin - offset, 0, end - begin);
+            }
+            return number;
+        }
+        free_block(number);
+        ++trim->released;
+        return 0;
+    }
+
     struct Change {
         u32 number;
         bool dirty;
@@ -827,27 +956,30 @@ private:
     int error_;
 };
 
-u32 Ext2Mount::write_file_data(u32 number, const ext2_inode &original, u32 offset, u8 *buffer, u32 size) {
+u32 Ext2Mount::write_file_data(u32 number, const ext2_inode &original, u32 offset, u8 *buffer, u32 size,
+                              bool &validated) {
     IRQGuard guard;
     int error = check_write(number, original, false);
     if (error) return error;
     if (!size) return 0;
     if (!buffer) return (u32)-22;
-    u32 limit = (12 + ptrs_per_block_) * block_size_;
+    u32 limit = file_size_limit(original);
     if (original.i_size > limit || offset >= limit || size > limit - offset) return (u32)-27;
+    if (original.i_block[EXT2_TRIPLE_INDIRECT] || original.i_faddr) return (u32)-95;
 
     Ext2Transaction transaction(*this);
     if (!transaction.allocated_inode(number)) return transaction.error();
     ext2_inode inode = original;
+    if (!validated) {
+        if (!transaction.validate_blocks(inode)) return transaction.error();
+        validated = true;
+    }
     u32 group = (number - 1) / super_.s_inodes_per_group;
     if (offset > inode.i_size && inode.i_size % block_size_) {
         u32 last = inode.i_size / block_size_;
-        u32 block;
-        if (!get_block(inode, last, block)) return (u32)-5;
+        u32 block = transaction.file_block(inode, last, group, false);
+        if (transaction.error()) return transaction.error();
         if (block) {
-            if (block == inode.i_file_acl || block == inode.i_block[12] ||
-                block == inode.i_block[13] || block == inode.i_block[14]) return (u32)-5;
-            if (!transaction.allocated_block(block)) return transaction.error();
             u8 *data = transaction.block(block, Ext2Transaction::Write);
             if (!data) return transaction.error();
             u32 end = (offset / block_size_ == last) ? offset % block_size_ : block_size_;
@@ -1387,7 +1519,7 @@ u32 Ext2RegularFile::write_data(u32 pos, u8 *buffer, u32 size, u32 *append_end) 
     ext2_inode inode;
     if (!mount_ || !mount_->read_inode(inode_, &inode)) return (u32)-5;
     if (append_end) pos = inode.i_size;
-    u32 result = mount_->write_file_data(inode_, inode, pos, buffer, size);
+    u32 result = mount_->write_file_data(inode_, inode, pos, buffer, size, blocks_validated_);
     if ((s32)result > 0) {
         u32 end = pos + result;
         setSize(end > inode.i_size ? end : inode.i_size);

@@ -227,6 +227,13 @@ bool verify_storage_writes() {
     for (u32 i = 0; i < sizeof(disk->bytes); ++i) CHECK(disk->bytes[i] == snapshot[i]);
     CHECK(file->write(0, data, 2048) == 2048 && file->getSize() == 2048);
     u32 growth_writes = disk->writes - writes;
+    CHECK(file->write(2048, data, 3072) == 3072 && disk->super()->s_free_blocks_count == 2);
+    memcpy(snapshot, disk->bytes, sizeof(disk->bytes));
+    writes = disk->writes;
+    u32 double_offset = (12 + 256) * 1024;
+    CHECK(file->write(double_offset, data, 1) == (u32)-28);
+    CHECK(disk->writes == writes && file->getSize() == 5120);
+    for (u32 i = 0; i < sizeof(disk->bytes); ++i) CHECK(disk->bytes[i] == snapshot[i]);
     kfree(snapshot);
     root->remove();
 
