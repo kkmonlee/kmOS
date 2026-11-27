@@ -1,4 +1,5 @@
 #include <runtime/alloc.h>
+#include <runtime/buddy.h>
 #include <runtime/unified_alloc.h>
 #include <serial.h>
 
@@ -161,6 +162,30 @@ static bool exhaustion() {
     return true;
 }
 
+static bool reclaim_empty_slabs() {
+    void *cached[8];
+    for (auto &block : cached) {
+        block = slab_alloc(4096);
+        CHECK(block);
+    }
+    for (void *block : cached) slab_free(block);
+
+    void *held = nullptr;
+    while (void *block = buddy_allocator.alloc_order(0)) {
+        *(void **)block = held;
+        held = block;
+    }
+    void *recovered = kmalloc(4096);
+    kfree(recovered);
+    while (held) {
+        void *next = *(void **)held;
+        buddy_free(held);
+        held = next;
+    }
+    CHECK(recovered);
+    return true;
+}
+
 bool verify_heap() {
     CHECK(!kmalloc(0) && !kmalloc(~0U) && !kmalloc(1U << 31));
     CHECK(!kcalloc(0, 16) && !kcalloc(16, 0) && !kcalloc(~0U, 16));
@@ -180,6 +205,7 @@ bool verify_heap() {
     }
     CHECK(cache_reuse());
     CHECK(tracking_and_modes());
+    CHECK(reclaim_empty_slabs());
     CHECK(exhaustion());
 
     u8 *temporary = (u8 *)kmalloc_temp(63);

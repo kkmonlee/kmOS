@@ -211,6 +211,11 @@ void *UnifiedAllocator::internal_alloc(u32 size, u32 &allocator) {
             allocator = ALLOC_POLICY_BUDDY;
         }
     }
+    if (!ptr) {
+        slab_allocator.cache_reap();
+        ptr = buddy_allocator.alloc(size);
+        if (ptr) allocator = ALLOC_POLICY_BUDDY;
+    }
     
     return ptr;
 }

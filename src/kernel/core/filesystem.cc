@@ -92,7 +92,13 @@ int Filesystem::unlink(const char *path) {
   char leaf[File::kMaxNameLength + 1];
   int error;
   File *parent = resolve(path, leaf, sizeof(leaf), true, &error);
-  if (!parent) return error;
+  if (!parent) {
+    if (error == -2) {
+      File *file = this->path(path, nullptr, false);
+      if (file && file->getType() == TYPE_DIRECTORY) return -21;
+    }
+    return error;
+  }
   if (path[strlen(path) - 1] == '/') {
     parent->scan();
     File *file = parent->find(leaf);

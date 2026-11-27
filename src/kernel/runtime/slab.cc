@@ -204,11 +204,10 @@ bool SlabAllocator::cache_free(struct slab_cache *cache, void *obj) {
     cache->num_active_objs--;
     cache->num_free_objs++;
     
-    if (was_full) {
+    if (slab->free == cache->num_objs_per_slab)
+        move_slab(was_full ? &cache->slabs_full : &cache->slabs_partial, &cache->slabs_empty, slab);
+    else if (was_full)
         move_slab(&cache->slabs_full, &cache->slabs_partial, slab);
-    } else if (slab->free == cache->num_objs_per_slab) {
-        move_slab(&cache->slabs_partial, &cache->slabs_empty, slab);
-    }
     return true;
 }
 

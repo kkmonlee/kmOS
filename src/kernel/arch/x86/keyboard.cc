@@ -49,12 +49,15 @@ void Keyboard::init() {
     buffer_tail = 0;
     buffer_count = 0;
     
-    state.shift_pressed = false;
+    state.left_shift = false;
+    state.right_shift = false;
     state.ctrl_pressed = false;
     state.alt_pressed = false;
     state.caps_lock = false;
     
-    while (read_status() & KEYBOARD_STATUS_OUT_BUFFER_FULL) {
+    for (u32 drained = 0; drained < KEYBOARD_BUFFER_SIZE; ++drained) {
+        u8 status = read_status();
+        if (status == 0xff || !(status & KEYBOARD_STATUS_OUT_BUFFER_FULL)) break;
         read_data();
     }
     
@@ -90,7 +93,7 @@ void Keyboard::handle_interrupt() {
     update_key_state(key, !key_released);
     
     if (!key_released) {
-        char c = scancode_to_ascii(key, state.shift_pressed);
+        char c = scancode_to_ascii(key, state.left_shift || state.right_shift);
         if (state.caps_lock) {
             if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
             else if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
@@ -107,8 +110,10 @@ void Keyboard::handle_interrupt() {
 void Keyboard::update_key_state(u8 scancode, bool pressed) {
     switch (scancode) {
         case KEY_LSHIFT:
+            state.left_shift = pressed;
+            break;
         case KEY_RSHIFT:
-            state.shift_pressed = pressed;
+            state.right_shift = pressed;
             break;
         case KEY_CTRL:
             state.ctrl_pressed = pressed;
@@ -170,8 +175,9 @@ bool Keyboard::char_available() {
 bool Keyboard::key_pressed(u8 scancode) {
     switch (scancode) {
         case KEY_LSHIFT:
+            return state.left_shift;
         case KEY_RSHIFT:
-            return state.shift_pressed;
+            return state.right_shift;
         case KEY_CTRL:
             return state.ctrl_pressed;
         case KEY_ALT:

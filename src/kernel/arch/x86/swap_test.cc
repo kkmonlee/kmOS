@@ -5,7 +5,7 @@
 
 class TestSwapFile : public File {
 public:
-    TestSwapFile(const char *name) : File(name, TYPE_FILE) { setSize(2 * PAGESIZE); }
+    TestSwapFile(const char *name, u32 slots = 1) : File(name, TYPE_FILE) { setSize((slots + 1) * PAGESIZE); }
     u32 open(u32) override { return 0; }
     u32 close() override { return 0; }
 
@@ -15,22 +15,26 @@ public:
             for (u32 i = 0; i < sizeof(header); ++i) buffer[i] = header[i];
             return count;
         }
-        if (pos != PAGESIZE || count != PAGESIZE || fail_read) return (u32)-5;
-        for (u32 i = 0; i < count; ++i) buffer[i] = data[i];
+        if (!pos || pos % PAGESIZE || pos >= getSize() || count != PAGESIZE || fail_read) return (u32)-5;
+        const u8 *slot = data[pos / PAGESIZE - 1];
+        for (u32 i = 0; i < count; ++i) buffer[i] = slot[i];
         return count;
     }
 
     u32 write(u32 pos, u8 *buffer, u32 count) override {
-        if (pos != PAGESIZE || count != PAGESIZE || fail_write) return (u32)-5;
-        for (u32 i = 0; i < count; ++i) data[i] = buffer[i];
+        if (!pos || pos % PAGESIZE || pos >= getSize() || count != PAGESIZE ||
+            fail_write || pos == fail_write_at) return (u32)-5;
+        u8 *slot = data[pos / PAGESIZE - 1];
+        for (u32 i = 0; i < count; ++i) slot[i] = buffer[i];
         return count;
     }
 
     bool fail_read = false;
     bool fail_write = false;
+    u32 fail_write_at = 0;
 
 private:
-    u8 data[PAGESIZE];
+    u8 data[2][PAGESIZE];
 };
 
 bool verify_swap() {
@@ -83,6 +87,22 @@ bool verify_swap() {
     vmm.destroy_page_directory(child);
     vmm.destroy_page_directory(parent);
     if (!swap_manager.remove_file("swap-b") || vmm.frames_used != before) return false;
+
+    parent = vmm.create_page_directory();
+    TestSwapFile *multi = new TestSwapFile("swap-multi", 2);
+    if (!parent || !multi || !swap_manager.add_file(multi) ||
+        cow_manager.map_pages(parent, base, base + 3 * PAGESIZE, PG_PRESENT | PG_USER | PG_WRITE)) return false;
+    *(u8 *)vmm.get_physical_addr(parent, base) = 'x';
+    *(u8 *)vmm.get_physical_addr(parent, base + PAGESIZE) = 'y';
+    multi->fail_write_at = PAGESIZE;
+    if (!swap_manager.swap_out_page(parent, base)) return false;
+    multi->fail_write_at = 0;
+    if (!swap_manager.swap_out_page(parent, base + PAGESIZE) ||
+        cow_manager.unmap_pages(parent, base + 2 * PAGESIZE, base + 3 * PAGESIZE) ||
+        !vmm.copy_from_user(parent, data, base, 1) || data[0] != 'x' ||
+        !vmm.copy_from_user(parent, data + 1, base + PAGESIZE, 1) || data[1] != 'y') return false;
+    vmm.destroy_page_directory(parent);
+    if (!swap_manager.remove_file("swap-multi") || vmm.frames_used != before) return false;
     serial::write("[SWAP] Slot ownership, protection and I/O errors verified\n");
     return true;
 }

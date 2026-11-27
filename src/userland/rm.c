@@ -4,7 +4,7 @@ static int missing(const char *path, int result) {
     if (result == -2) return 1;
     if (result != -30) return 0;
     struct stat info;
-    return stat(path, &info) == -2;
+    return lstat(path, &info) == -2;
 }
 
 int main(int argc, char **argv) {

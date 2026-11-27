@@ -72,6 +72,8 @@ static bool exhaust_frames(const multiboot_info *boot) {
 }
 
 static bool verify_paging(const multiboot_info *boot) {
+    char vendor[32] = "xxxxxxxxxxxxxxxx";
+    if (cpu_vendor_name(vendor) != 12 || vendor[12] || vendor[13] != 'x') return false;
     u32 cr0, cr3;
     asm volatile("mov %%cr0, %0; mov %%cr3, %1" : "=r"(cr0), "=r"(cr3));
     if ((cr0 & 0x80010000) != 0x80010000 || cr3 != current_directory->physical_address) return false;

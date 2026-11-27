@@ -142,12 +142,12 @@ void IO::putc(char c) {
         *video = c;
         *(video + 1) = kattr;
         x++;
-        if (x > 79) {
-            x = 0;
-            yl++;
-        }
     }
 
+    if (x >= 80) {
+        x = 0;
+        yl++;
+    }
     if (yl > 24) scrollup(yl - 24);
 }
 

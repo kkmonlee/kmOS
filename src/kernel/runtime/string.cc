@@ -67,7 +67,8 @@ extern "C" {
 
 
     void strcat(void *dest, const void *src) {
-        memcpy((char*) ((int)dest + (int)strlen((char*)dest)), (char*)src, strlen((char*)src));
+        char *text = (char *)dest;
+        memcpy(text + strlen(text), src, strlen((char *)src) + 1);
     }
 
     int strncmp(const char* s1, const char* s2, int c) {

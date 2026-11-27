@@ -103,7 +103,7 @@ public:
     Ext2Mount(BlockDevice *device, bool writable)
         : device_(device), groups_(nullptr), group_count_(0),
           block_size_(1024), inode_size_(128), ptrs_per_block_(256), references_(0),
-          writable_(writable), nodes_(nullptr) {}
+          manage_orphans_(writable), writable_(writable), nodes_(nullptr) {}
 
     ~Ext2Mount() { kfree(groups_); }
     void retain() { ++references_; }
@@ -471,6 +471,7 @@ private:
     u32 references_;
     u32 table_blocks_;
     u32 inode_blocks_;
+    const bool manage_orphans_;
     bool writable_;
     Ext2Node *nodes_;
 };
@@ -1277,7 +1278,7 @@ int Ext2Mount::truncate_file(u32 number, u32 size) {
 
 int Ext2Mount::reap_inode(u32 number, Ext2Node *closing) {
     IRQGuard guard;
-    if (!super_.s_last_orphan || inode_referenced(number, closing)) return 0;
+    if (!manage_orphans_ || !super_.s_last_orphan || inode_referenced(number, closing)) return 0;
     if (!writable_) return -30;
     Ext2Transaction transaction(*this);
     ext2_inode inode;

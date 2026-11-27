@@ -269,10 +269,13 @@ static bool ranges_and_cleanup() {
     CHECK(cow_manager.map_pages(pd, start, start + 8192, PG_PRESENT | PG_WRITE | PG_USER) == -1);
     CHECK(vmm.frames_used == used && !vmm.get_physical_addr(pd, start));
     release_frames(held);
+    used = vmm.frames_used;
     CHECK(cow_manager.map_pages(pd, start, start + 8192, PG_PRESENT | PG_WRITE | PG_USER) == 0);
     vmm.switch_page_directory(pd);
     for (u32 i = 0; i < 8192; ++i) CHECK(!((volatile u8 *)start)[i]);
     CHECK(cow_manager.unmap_pages(pd, start, start + 8192) == 0);
+    CHECK(vmm.frames_used == used && !vmm.get_page_table(pd, start, 0) &&
+          !vmm.get_page_table(pd, start + PAGESIZE, 0));
     destroy(pd);
     CHECK(vmm.frames_used == before);
     return true;

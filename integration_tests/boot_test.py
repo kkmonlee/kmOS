@@ -178,6 +178,18 @@ def boot(args, ram, machine="pc"):
             vm.send_serial(b"\n")
             text = vm.wait(lambda text: "kmOS:/$ " in text[start:])[start:]
             assert "\n1Aa\n" in text, text
+            start = len(vm.text())
+            vm.send_serial(b"echo ")
+            vm.wait(lambda text: "echo " in text[start:])
+            for release, hold in (("shift", "shift_r"), ("shift_r", "shift")):
+                for key, down in (("shift", True), ("shift_r", True), (release, False),
+                                  ("a", True), ("a", False), (hold, False)):
+                    vm.command("input-send-event", {"events": [{"type": "key", "data": {
+                        "down": down, "key": {"type": "qcode", "data": key}}}]})
+                    time.sleep(0.04)
+            vm.send_serial(b"\n")
+            text = vm.wait(lambda text: "kmOS:/$ " in text[start:])[start:]
+            assert "\nAA\n" in text, text
         for command in ("fetch", "lsb_release -a"):
             start = len(vm.text())
             info = vm.serial_command(command)[start:]
@@ -482,6 +494,12 @@ def shell_redirection(args, temp):
     with disk.open("wb") as image:
         image.truncate(8 * 1024 * 1024)
     subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", str(disk)], check=True)
+    for name, data in (("shell-input", b"echo final-line"), ("vga-tab", b"X" * 72 + b"\tAB\n")):
+        fixture = temp / name
+        fixture.write_bytes(data)
+        seeded = subprocess.run(["debugfs", "-w", "-R", f'write "{fixture}" /{name}', str(disk)],
+                                check=True, capture_output=True, text=True)
+        assert "Allocated inode:" in seeded.stdout, seeded.stdout + seeded.stderr
     userland = Path(__file__).resolve().parents[1] / "src/userland"
     modules = ",".join(str(userland / f"{name}.elf") for name in ("cat", "sh"))
     for mode in ("rw", "ro"):
@@ -522,6 +540,15 @@ def shell_redirection(args, temp):
             else:
                 assert "sh: cannot redirect: note" in command("echo denied >>note")
                 assert "\nfirst\nsecond\n" in command("cat <'saved copy'")
+                start = len(vm.text())
+                vm.send_serial(b"/bin/sh <shell-input\n")
+                vm.wait(lambda text: "\nfinal-line\nsh$ \nsh$ " in text[start:])
+                command("cat vga-tab")
+                dump = vm.monitor("xp /2000hx 0xb8000")
+                cells = bytes(int(value, 16) & 255 for value in re.findall(r"\b0x[\da-fA-F]{4}\b", dump))
+                assert len(cells) == 2000, dump
+                row, column = divmod(cells.index(b"X" * 72), 80)
+                assert column == 0 and cells[(row + 1) * 80:(row + 1) * 80 + 2] == b"AB"
             vm.send_serial(b"exit\n")
             text = vm.wait(lambda text: "kmOS:/$ " in text)
             assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
@@ -586,6 +613,8 @@ def file_commands(args, temp):
                 assert "mkdir: saved/file/child: not a directory" in command("mkdir -p saved/file/child")
                 assert "mkdir: first: already exists" in command("mkdir first")
                 assert "rm: tree: is a directory" in command("rm tree")
+                assert "rm: /: is a directory" in command("rm -f /")
+                assert "rm: tree/.: is a directory" in command("rm -f tree/.")
                 assert "rmdir: tree: directory not empty" in command("rmdir tree")
                 assert "rmdir: missing: no such file or directory" in command("rmdir missing first second")
                 assert "rm: missing: no such file or directory" in command("rm -- missing -file")
@@ -600,6 +629,7 @@ def file_commands(args, temp):
                 assert "mkdir: denied: read-only filesystem" in command("mkdir denied")
                 assert "rmdir: saved/sub: read-only filesystem" in command("rmdir saved/sub")
                 assert "rm: saved/file: read-only filesystem" in command("rm -f saved/file")
+                assert "rm: dangling: read-only filesystem" in command("rm -f dangling")
                 assert "mv: saved/file: read-only filesystem" in command("mv saved/file denied")
                 assert "cp: denied: read-only filesystem" in command("cp saved/file denied")
                 assert "ln: denied: read-only filesystem" in command("ln saved/file denied")
@@ -876,6 +906,12 @@ def disk_remove(args, temp):
     with VM(args, "ext2-orphan-reject", append="disk=hda,rw", disk=disk) as vm:
         text = vm.wait(lambda text: "[BOOT] Ready" in text)
         assert "[DISK] Could not mount hda" in text, text
+    before_readonly = disk.read_bytes()
+    with VM(args, "ext2-orphan-readonly", append="user disk=hda", module=orphan_program, disk=disk) as vm:
+        text = vm.wait(lambda text: "[BOOT] Ready" in text)
+        assert "[DISK] /mnt/disk mounted ro" in text and "read-only orphan mount closes normally" in text, text
+        assert "[USER] Exit status=00000000" in text and "Frame leak" not in text, text
+    assert disk.read_bytes() == before_readonly
     recovered = subprocess.run(["e2fsck", "-f", "-y", str(disk)], capture_output=True, text=True)
     assert recovered.returncode in (0, 1), recovered.stdout + recovered.stderr
     checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
@@ -1368,6 +1404,10 @@ def main():
         file_commands(args, Path(temp))
         directory_listing(args, Path(temp))
     boot(args, 64, "q35")
+    with VM(args, "serial-only", machine="pc,i8042=off") as vm:
+        vm.wait(lambda text: "[BOOT] Ready" in text and "kmOS:/$ " in text)
+        assert "\nserial-only\n" in vm.serial_command("echo serial-only")
+    print("PASS serial console without a PS/2 controller", flush=True)
     user(args, Path(__file__).resolve().parents[1] / "src/userland/hello.elf", machine="q35")
     with tempfile.TemporaryDirectory(prefix="kmos-user-") as temp:
         user_failures(args, Path(temp))

@@ -150,12 +150,23 @@ void COWManager::cow_free_page_range(page_directory *pd, u32 start, u32 end) {
     if (!valid_range(pd, start, end) || start == end) return;
     IRQGuard guard;
     for (u32 i = VADDR_PD_OFFSET(start); i <= VADDR_PD_OFFSET(end - 1); ++i) {
+        if (!pd->tables[i].user || pd->tables[i].page_size) continue;
         page_table_entry *table = vmm.get_page_table(pd, i << 22, 0);
-        if (!table) continue;
+        if (!table || table == kernel_directory->page_tables[i]) continue;
+        bool occupied = false;
         for (u32 j = 0; j < 1024; ++j) {
+            if (!table[j].present && !table[j].swapped) continue;
             u32 address = (i << 22) | (j << 12);
-            if (address >= start && address < end && table[j].user && (table[j].present || table[j].swapped))
+            if (address >= start && address < end && table[j].user)
                 vmm.unmap_page(pd, address);
+            else
+                occupied = true;
+        }
+        if (!occupied) {
+            u32 frame = pd->tables[i].frame << 12;
+            pd->tables[i] = {};
+            pd->page_tables[i] = nullptr;
+            vmm.free_frame(frame);
         }
     }
 }

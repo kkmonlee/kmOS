@@ -47,7 +47,8 @@
 #define KEYBOARD_BUFFER_SIZE 256
 
 struct keyboard_state {
-    bool shift_pressed;
+    bool left_shift;
+    bool right_shift;
     bool ctrl_pressed;
     bool alt_pressed;
     bool caps_lock;

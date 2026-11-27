@@ -99,12 +99,12 @@ static int input(char *line) {
     u32 used = 0;
     int too_long = 0;
     for (;;) {
-        char c;
+        char c = 0;
         int count = read(0, &c, 1);
-        if (count <= 0) return -1;
+        if (count < 0 || (!count && !used)) return -1;
         if (c == 3) { puts("^C\n"); return 0; }
         if (c == 4 && !used) return -1;
-        if (c == '\n' || c == '\r') {
+        if (!count || c == '\n' || c == '\r') {
             puts("\n");
             if (too_long) {
                 error("sh: line too long\n");

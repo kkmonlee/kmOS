@@ -156,12 +156,22 @@ bool SwapManager::swap_out_page(page_directory *pd, u32 address) {
 
     for (swap_device *dev = devices; dev; dev = dev->next) {
         if (dev->inuse_pages == dev->pages) continue;
-        u32 index = dev->next_slot;
-        while (dev->references[index]) index = (index + 1) % dev->pages;
-        if (dev->file->write((index + 1) * PAGESIZE, (u8 *)frame, PAGESIZE) != PAGESIZE) continue;
+        constexpr u32 max_write_attempts = 4;
+        u32 index = dev->pages;
+        u32 attempts = 0;
+        for (u32 scanned = 0; scanned < dev->pages && attempts < max_write_attempts; ++scanned) {
+            u32 candidate = dev->next_slot;
+            dev->next_slot = (candidate + 1) % dev->pages;
+            if (dev->references[candidate]) continue;
+            ++attempts;
+            if (dev->file->write((candidate + 1) * PAGESIZE, (u8 *)frame, PAGESIZE) == PAGESIZE) {
+                index = candidate;
+                break;
+            }
+        }
+        if (index == dev->pages) continue;
         dev->references[index] = 1;
         ++dev->inuse_pages;
-        dev->next_slot = (index + 1) % dev->pages;
         bool writable = entry.writable || entry.cow;
         entry = {};
         entry.writable = writable;
