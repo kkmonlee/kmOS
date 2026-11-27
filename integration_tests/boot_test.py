@@ -842,7 +842,7 @@ def disk_remove(args, temp):
     disk = temp / "ext2-orphan-crash.img"
     with disk.open("wb") as image:
         image.truncate(8 * 1024 * 1024)
-    made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-O", "^resize_inode", str(disk)],
+    made = subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", "1024", "-O", "^resize_inode", str(disk)],
                           capture_output=True, text=True)
     assert made.returncode == 0, made.stdout + made.stderr
     with disk.open("rb") as image:
@@ -852,6 +852,10 @@ def disk_remove(args, temp):
     with VM(args, "ext2-orphan-crash", append="user disk=hda,rw", module=orphan_program, disk=disk) as vm:
         text = vm.wait(lambda text: "open orphans ready" in text or "[PANIC]" in text)
         assert "open orphans ready" in text and "[PANIC]" not in text, text
+    with disk.open("rb") as image:
+        image.seek(1024 + 12)
+        blocks, inodes = struct.unpack("<II", free_before)
+        assert struct.unpack("<II", image.read(8)) == (blocks - 6, inodes - 2)
     with VM(args, "ext2-orphan-reject", append="disk=hda,rw", disk=disk) as vm:
         text = vm.wait(lambda text: "[BOOT] Ready" in text)
         assert "[DISK] Could not mount hda" in text, text
@@ -865,7 +869,7 @@ def disk_remove(args, temp):
     with VM(args, "ext2-orphan-recovered", append="disk=hda,rw", disk=disk) as vm:
         text = vm.wait(lambda text: "[BOOT] Ready" in text)
         assert "[DISK] /mnt/disk mounted rw" in text, text
-    print("PASS recovery of open unlinked files after interrupted execution", flush=True)
+    print("PASS recovery of open unlinked files with doubly indirect blocks", flush=True)
 
 
 def disk_directories(args, temp):

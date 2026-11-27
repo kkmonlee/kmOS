@@ -16,6 +16,7 @@ extern "C" {
 }
 
 static const char message[] = "disk read verified\n";
+static constexpr u32 double_offset = (12 + 256) * 1024;
 
 class TestDisk : public BlockDevice {
 public:
@@ -230,7 +231,6 @@ bool verify_storage_writes() {
     CHECK(file->write(2048, data, 3072) == 3072 && disk->super()->s_free_blocks_count == 2);
     memcpy(snapshot, disk->bytes, sizeof(disk->bytes));
     writes = disk->writes;
-    u32 double_offset = (12 + 256) * 1024;
     CHECK(file->write(double_offset, data, 1) == (u32)-28);
     CHECK(disk->writes == writes && file->getSize() == 5120);
     for (u32 i = 0; i < sizeof(disk->bytes); ++i) CHECK(disk->bytes[i] == snapshot[i]);
@@ -261,6 +261,25 @@ bool verify_storage_writes() {
         CHECK(!disk->writes && disk->super()->s_state == 1);
         root->remove();
     }
+
+    disk->reset(1024);
+    root = write_mount(disk);
+    CHECK(root && root->createFile("aliased", 0644, file) == 0);
+    constexpr u32 second_leaf = double_offset + 256 * 1024;
+    CHECK(file->write(double_offset, data, 1) == 1 && file->write(second_leaf, data, 1) == 1);
+    u32 indirect = disk->inode(file->getInode())->i_block[13];
+    root->remove();
+    u32 *leaves = (u32 *)(disk->bytes + indirect * 1024);
+    u32 *first = (u32 *)(disk->bytes + leaves[0] * 1024);
+    u32 *second = (u32 *)(disk->bytes + leaves[1] * 1024);
+    *second = *first;
+    writes = disk->writes;
+    root = write_mount(disk);
+    CHECK(root);
+    file = root->find("aliased");
+    CHECK(file && file->write(double_offset, data, 1) == (u32)-5);
+    CHECK(disk->writes == writes && disk->super()->s_state == 1);
+    root->remove();
     kfree(data);
     delete disk;
     serial::write("[STORAGE] Allocation rollback and write failures verified\n");
@@ -278,6 +297,66 @@ static File *removal_mount(TestDisk *disk, File *&file) {
         return nullptr;
     }
     return root;
+}
+
+static bool verify_indirect_failures(TestDisk *disk) {
+    enum Operation { Allocate, Truncate, Close };
+    for (u32 operation = Allocate; operation <= Close; ++operation) {
+        u32 count = 0;
+        for (u32 attempt = 0; attempt <= count; ++attempt) {
+            disk->reset(1024);
+            u32 free_blocks = disk->super()->s_free_blocks_count;
+            File *root = write_mount(disk);
+            File *file = nullptr;
+            CHECK(root && root->createFile("indirect", 0644, file) == 0);
+            u8 data = 0x3a;
+            if (operation != Allocate) CHECK(file->write(double_offset, &data, 1) == 1);
+            if (operation == Close) {
+                file->retain();
+                CHECK(root->unlinkFile("indirect") == 0 && !disk->super()->s_state);
+            }
+            auto change = [&]() -> int {
+                if (operation == Truncate) return file->truncate(0);
+                if (operation == Close) return (int)file->close();
+                int result = (int)file->write(double_offset, &data, 1);
+                return result == 1 ? 0 : result;
+            };
+            u32 before = disk->writes;
+            if (attempt) disk->fail_write_after = before + attempt - 1;
+            int result = change();
+            bool clean = !attempt || (attempt == 1 && operation != Close);
+            if (!attempt) {
+                CHECK(result == 0);
+                count = disk->writes - before;
+                CHECK(count && disk->super()->s_free_blocks_count ==
+                      free_blocks - (operation == Allocate ? 3 : 0));
+            } else {
+                CHECK(result == -5);
+                u32 writes = disk->writes;
+                CHECK(change() == -30 && disk->writes == writes);
+            }
+            CHECK(disk->super()->s_state == clean);
+            if (operation == Close) file->release();
+            root->remove();
+            root = write_mount(disk);
+            CHECK((root != nullptr) == clean);
+            if (root) {
+                file = root->find("indirect");
+                if (operation == Close) CHECK(!file);
+                else {
+                    CHECK(file);
+                    u32 size = (operation == Allocate) == !attempt ? double_offset + 1 : 0;
+                    CHECK(file->getSize() == size);
+                    if (size) {
+                        u8 value = 0;
+                        CHECK(file->read(double_offset, &value, 1) == 1 && value == data);
+                    }
+                }
+                root->remove();
+            }
+        }
+    }
+    return true;
 }
 
 bool verify_storage_removal() {
@@ -318,6 +397,7 @@ bool verify_storage_removal() {
             root->remove();
         }
     }
+    CHECK(verify_indirect_failures(disk));
     delete disk;
     serial::write("[STORAGE] Truncate, unlink and close failures verified\n");
     return true;
