@@ -884,6 +884,39 @@ def disk_remove(args, temp):
     print("PASS recovery of open unlinked files with doubly indirect blocks", flush=True)
 
 
+def disk_indirect_recovery(args, temp):
+    def free_counts(disk):
+        with disk.open("rb") as image:
+            image.seek(1024 + 12)
+            return struct.unpack("<II", image.read(8))
+
+    for operation, blocks_used, inodes_used in (("allocate", 3, 1), ("truncate", 0, 1), ("close", 0, 0)):
+        disk = temp / f"ext2-interrupted-{operation}.img"
+        with disk.open("wb") as image:
+            image.truncate(8 * 1024 * 1024)
+        subprocess.run(["mke2fs", "-q", "-t", "ext2", "-F", "-b", "1024",
+                        "-O", "^resize_inode", str(disk)], check=True)
+        blocks, inodes = free_counts(disk)
+        with VM(args, f"ext2-interrupted-{operation}", append=f"test=storage-recovery {operation}", disk=disk) as vm:
+            text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+            assert vm.process.wait(timeout=2) == 33, text
+        expected = blocks - blocks_used, inodes - inodes_used
+        if operation != "close":
+            assert free_counts(disk) != expected
+        repaired = subprocess.run(["e2fsck", "-f", "-y", str(disk)], capture_output=True, text=True)
+        assert repaired.returncode in (0, 1), repaired.stdout + repaired.stderr
+        checked = subprocess.run(["e2fsck", "-f", "-n", str(disk)], capture_output=True, text=True)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+        assert free_counts(disk) == expected
+        if operation == "allocate":
+            data = subprocess.run(["debugfs", "-R", "cat /indirect", str(disk)], capture_output=True, check=True)
+            assert data.stdout == bytes((12 + 256) * 1024) + b":", data.stderr
+        with VM(args, f"ext2-interrupted-{operation}-recovered", append="disk=hda,rw", disk=disk) as vm:
+            text = vm.wait(lambda text: "[BOOT] Ready" in text)
+            assert "[DISK] /mnt/disk mounted rw" in text, text
+        print(f"PASS e2fsck recovery after interrupted doubly indirect {operation}", flush=True)
+
+
 def disk_directories(args, temp):
     with VM(args, "ext2-directory-errors", append="test=storage-directories") as vm:
         text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
@@ -1320,6 +1353,7 @@ def main():
         disk_mount(args, Path(temp))
         disk_growth(args, Path(temp))
         disk_remove(args, Path(temp))
+        disk_indirect_recovery(args, Path(temp))
         disk_directories(args, Path(temp))
         disk_indexed_directories(args, Path(temp))
         user_heap(args, Path(temp))

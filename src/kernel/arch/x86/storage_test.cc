@@ -2,6 +2,7 @@
 #include <filesystem.h>
 #include <ext2.h>
 #include <block_device.h>
+#include <core/boot.h>
 #include <ata.h>
 #include <serial.h>
 
@@ -181,7 +182,7 @@ bool verify_storage() {
     return true;
 }
 
-static File *write_mount(TestDisk *disk) {
+static File *write_mount(BlockDevice *disk) {
     File *point = new File("storage-write", TYPE_DIRECTORY);
     if (!point) return nullptr;
     File *root = ext2_driver.mount(point, disk, true);
@@ -299,9 +300,19 @@ static File *removal_mount(TestDisk *disk, File *&file) {
     return root;
 }
 
+enum class IndirectChange { Allocate, Truncate, Close };
+
+static int change_indirect(File *file, IndirectChange operation) {
+    if (operation == IndirectChange::Truncate) return file->truncate(0);
+    if (operation == IndirectChange::Close) return (int)file->close();
+    u8 data = 0x3a;
+    int result = (int)file->write(double_offset, &data, 1);
+    return result == 1 ? 0 : result;
+}
+
 static bool verify_indirect_failures(TestDisk *disk) {
-    enum Operation { Allocate, Truncate, Close };
-    for (u32 operation = Allocate; operation <= Close; ++operation) {
+    const IndirectChange operations[] = {IndirectChange::Allocate, IndirectChange::Truncate, IndirectChange::Close};
+    for (auto operation : operations) {
         u32 count = 0;
         for (u32 attempt = 0; attempt <= count; ++attempt) {
             disk->reset(1024);
@@ -309,53 +320,95 @@ static bool verify_indirect_failures(TestDisk *disk) {
             File *root = write_mount(disk);
             File *file = nullptr;
             CHECK(root && root->createFile("indirect", 0644, file) == 0);
-            u8 data = 0x3a;
-            if (operation != Allocate) CHECK(file->write(double_offset, &data, 1) == 1);
-            if (operation == Close) {
+            if (operation != IndirectChange::Allocate) CHECK(change_indirect(file, IndirectChange::Allocate) == 0);
+            if (operation == IndirectChange::Close) {
                 file->retain();
                 CHECK(root->unlinkFile("indirect") == 0 && !disk->super()->s_state);
             }
-            auto change = [&]() -> int {
-                if (operation == Truncate) return file->truncate(0);
-                if (operation == Close) return (int)file->close();
-                int result = (int)file->write(double_offset, &data, 1);
-                return result == 1 ? 0 : result;
-            };
             u32 before = disk->writes;
             if (attempt) disk->fail_write_after = before + attempt - 1;
-            int result = change();
-            bool clean = !attempt || (attempt == 1 && operation != Close);
+            int result = change_indirect(file, operation);
+            bool clean = !attempt || (attempt == 1 && operation != IndirectChange::Close);
             if (!attempt) {
                 CHECK(result == 0);
                 count = disk->writes - before;
                 CHECK(count && disk->super()->s_free_blocks_count ==
-                      free_blocks - (operation == Allocate ? 3 : 0));
+                      free_blocks - (operation == IndirectChange::Allocate ? 3 : 0));
             } else {
                 CHECK(result == -5);
                 u32 writes = disk->writes;
-                CHECK(change() == -30 && disk->writes == writes);
+                CHECK(change_indirect(file, operation) == -30 && disk->writes == writes);
             }
             CHECK(disk->super()->s_state == clean);
-            if (operation == Close) file->release();
+            if (operation == IndirectChange::Close) file->release();
             root->remove();
             root = write_mount(disk);
             CHECK((root != nullptr) == clean);
             if (root) {
                 file = root->find("indirect");
-                if (operation == Close) CHECK(!file);
+                if (operation == IndirectChange::Close) CHECK(!file);
                 else {
                     CHECK(file);
-                    u32 size = (operation == Allocate) == !attempt ? double_offset + 1 : 0;
+                    u32 size = (operation == IndirectChange::Allocate) == !attempt ? double_offset + 1 : 0;
                     CHECK(file->getSize() == size);
                     if (size) {
                         u8 value = 0;
-                        CHECK(file->read(double_offset, &value, 1) == 1 && value == data);
+                        CHECK(file->read(double_offset, &value, 1) == 1 && value == 0x3a);
                     }
                 }
                 root->remove();
             }
         }
     }
+    return true;
+}
+
+class InterruptedDisk : public BlockDevice {
+public:
+    explicit InterruptedDisk(BlockDevice &device) : BlockDevice("interrupted-test", 512, false), device_(device) {}
+
+    u32 read_blocks(u32 lba, u32 count, void *buffer) override {
+        return device_.read_blocks(lba, count, buffer);
+    }
+
+    u32 write_blocks(u32 lba, u32 count, const void *buffer) override {
+        if (interrupted) return RETURN_FAILURE;
+        if (lba == 1024 / 512 && remaining && !--remaining) {
+            interrupted = true;
+            return RETURN_FAILURE;
+        }
+        return device_.write_blocks(lba, count, buffer);
+    }
+
+    u32 remaining = 0;
+    bool interrupted = false;
+
+private:
+    BlockDevice &device_;
+};
+
+bool verify_storage_recovery(const char *arguments) {
+    ata_init(false);
+    ATADevice *device = ata_primary_master();
+    CHECK(device);
+    InterruptedDisk disk(*device);
+    File *root = write_mount(&disk);
+    File *file = nullptr;
+    CHECK(root && root->createFile("indirect", 0644, file) == 0 && file);
+    auto operation = IndirectChange::Allocate;
+    if (boot_has_argument(arguments, "truncate")) operation = IndirectChange::Truncate;
+    if (boot_has_argument(arguments, "close")) operation = IndirectChange::Close;
+    if (operation != IndirectChange::Allocate) CHECK(change_indirect(file, IndirectChange::Allocate) == 0);
+    if (operation == IndirectChange::Close) {
+        file->retain();
+        CHECK(root->unlinkFile("indirect") == 0);
+    }
+    disk.remaining = operation == IndirectChange::Close ? 3 : 2;
+    CHECK(change_indirect(file, operation) == -5 && disk.interrupted);
+    CHECK(change_indirect(file, operation) == -30);
+    if (operation == IndirectChange::Close) file->release();
+    root->remove();
+    CHECK(!write_mount(&disk));
     return true;
 }
 
