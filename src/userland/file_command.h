@@ -77,7 +77,8 @@ static inline int transfer_paths(int argc, char **argv, int first, const char *c
     const char *destination = argv[argc - 1];
     struct stat info;
     int result = stat(destination, &info);
-    if (result && result != -2) return file_error(command, destination, result);
+    if (result && result != -2 && (lstat(destination, &info) || !S_ISLNK(info.st_mode)))
+        return file_error(command, destination, result);
     int directory = !result && S_ISDIR(info.st_mode);
     if (argc - first > 2 && !directory) return file_error(command, destination, -20);
 

@@ -576,6 +576,11 @@ def file_commands(args, temp):
                 assert "\n../file\n" in command("readlink saved/sub/soft")
                 assert "\nsaved\n" in command("cat saved/sub/soft")
                 assert "ln: /sys/env/hard: cross-filesystem link" in command("ln saved/file /sys/env/hard")
+                assert "ln: missing: no such file or directory" in command("ln missing alias")
+                assert "rm: saved/sub/soft/: not a directory" in command("rm -f saved/sub/soft/")
+                for line in ("ln -s cycle cycle", "echo replaced >replacement", "mv replacement cycle"):
+                    assert command(line) == line + "\nsh$ ", line
+                assert "\nreplaced\n" in command("cat cycle")
                 assert "mv: saved/sub/copy: cross-filesystem move" in command("mv saved/sub/copy /sys/env/copy")
                 assert "ls: cannot stat: copy" in command("ls copy")
                 assert "mkdir: saved/file/child: not a directory" in command("mkdir -p saved/file/child")

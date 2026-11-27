@@ -1157,6 +1157,9 @@ int Ext2Mount::create_node(Ext2Directory *dir, const char *name, u16 mode, File 
     IRQGuard guard;
     file = nullptr;
     if (!writable_) return -30;
+    u32 target_size = target ? strlen(target) : 0;
+    if (target && !target_size) return -2;
+    if (target_size >= block_size_) return -36;
     u32 length = 0;
     while (name && name[length] && length <= File::kMaxNameLength) ++length;
     if (!length || length > File::kMaxNameLength || !strcmp(name, ".") || !strcmp(name, "..")) return -22;
@@ -1202,8 +1205,7 @@ int Ext2Mount::create_node(Ext2Directory *dir, const char *name, u16 mode, File 
         inode.i_size = block_size_;
         ++directory.i_links_count;
     } else if (target) {
-        inode.i_size = strlen(target);
-        if (!inode.i_size || inode.i_size >= block_size_) return -36;
+        inode.i_size = target_size;
         if (inode.i_size < sizeof(inode.i_block)) {
             memcpy(inode.i_block, target, inode.i_size);
         } else {

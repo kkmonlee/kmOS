@@ -91,8 +91,14 @@ int Filesystem::unlink(const char *path) {
   IRQGuard guard;
   char leaf[File::kMaxNameLength + 1];
   int error;
-  File *parent = resolve(path, leaf, sizeof(leaf), false, &error);
+  File *parent = resolve(path, leaf, sizeof(leaf), true, &error);
   if (!parent) return error;
+  if (path[strlen(path) - 1] == '/') {
+    parent->scan();
+    File *file = parent->find(leaf);
+    if (!file) return -2;
+    return file->getType() == TYPE_DIRECTORY ? -21 : -20;
+  }
   return parent->unlinkFile(leaf);
 }
 

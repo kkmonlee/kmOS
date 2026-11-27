@@ -148,13 +148,26 @@ static void verify_links(void) {
           original.st_ino == alias.st_ino);
     CHECK(stat("relative", &alias) == 0 && S_ISREG(alias.st_mode) && alias.st_ino != original.st_ino);
     CHECK(lstat("directory/", &alias) == 0 && S_ISDIR(alias.st_mode));
-    CHECK(rmdir("directory") == -20 && unlink("directory/") < 0);
+    CHECK(rmdir("directory") == -20 && unlink("directory/") == -20);
+    CHECK(unlink("sub/") == -21 && unlink("missing/") == -2);
     CHECK(readlink("relative", bytes, sizeof(bytes)) == 2 && bytes[0] == 's' && bytes[1] == 'u');
     CHECK(readlink("sub/data", bytes, 2) == -22 && readlink("relative", bytes, 0) == -22);
     CHECK(symlink("../relative", "sub/up") == 0);
     check_byte("directory/up", 'a');
     check_byte("absolute", 'a');
     check_link("../has-link/unknown", "target");
+
+    char boundary[61];
+    for (u32 i = 0; i < sizeof(boundary); ++i) boundary[i] = 'a';
+    boundary[59] = 0;
+    CHECK(symlink(boundary, "inline-limit") == 0);
+    CHECK(lstat("inline-limit", &alias) == 0 && alias.st_size == 59 && alias.st_blocks == 0);
+    check_link("inline-limit", boundary);
+    boundary[59] = 'a';
+    boundary[60] = 0;
+    CHECK(symlink(boundary, "block-minimum") == 0);
+    CHECK(lstat("block-minimum", &alias) == 0 && alias.st_size == 60 && alias.st_blocks > 0);
+    check_link("block-minimum", boundary);
 
     char long_target[1025];
     for (u32 i = 0; i < sizeof(long_target) - 1; i += 2) {

@@ -3,6 +3,8 @@
 static int hard_link(const char *source, const char *destination) {
     int result = link(source, destination);
     if (result == -18) return file_message("ln", destination, "cross-filesystem link");
+    struct stat info;
+    if (result == -2 && lstat(source, &info) == -2) return file_error("ln", source, result);
     return result ? file_error("ln", destination, result) : 0;
 }
 
