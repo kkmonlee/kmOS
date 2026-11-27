@@ -17,10 +17,14 @@ void Syscalls::init()
   add(SYS_lseek, &call_lseek);
   add(SYS_getdents, &call_getdents);
   add(SYS_stat, &call_stat);
+  add(SYS_lstat, &call_lstat);
   add(SYS_fstat, &call_fstat);
   add(SYS_ftruncate, &call_ftruncate);
   add(SYS_unlink, &call_unlink);
   add(SYS_rename, &call_rename);
+  add(SYS_link, &call_link);
+  add(SYS_symlink, &call_symlink);
+  add(SYS_readlink, &call_readlink);
   add(SYS_mkdir, &call_mkdir);
   add(SYS_rmdir, &call_rmdir);
   add(SYS_read, &call_read);

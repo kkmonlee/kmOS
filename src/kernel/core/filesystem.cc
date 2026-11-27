@@ -60,27 +60,28 @@ File *Filesystem::getRoot()
   return root;
 }
 
-File *Filesystem::path(const char *p, int *error)
+File *Filesystem::path(const char *p, int *error, bool follow)
 {
-  return resolve(p, nullptr, 0, false, error);
+  return resolve(p, nullptr, 0, false, error, follow ? Lookup::Follow : Lookup::NoFollow);
 }
 
 int Filesystem::open(const char *name, u32 flags, u32 mode, File *&file) {
   IRQGuard guard;
   int error;
-  file = path(name, &error);
+  bool exclusive = (flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL);
+  file = path(name, &error, !exclusive);
   if (flags & O_DIRECTORY) {
     if (!file) return error;
     if (file->getType() != TYPE_DIRECTORY) return -20;
     return (flags & O_ACCMODE) == O_RDONLY ? 0 : -21;
   }
   if (file) {
-    if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) return -17;
+    if (exclusive) return -17;
     return file->getType() == TYPE_FILE || file->getType() == TYPE_DEVICE ? 0 : -21;
   }
   if (error != -2 || !(flags & O_CREAT)) return error;
   char leaf[File::kMaxNameLength + 1];
-  File *parent = resolve(name, leaf, sizeof(leaf), false, &error);
+  File *parent = resolve(name, leaf, sizeof(leaf), false, &error, exclusive ? Lookup::Follow : Lookup::Create);
   if (!parent) return error;
   int result = parent->createFile(leaf, mode, file);
   return result ? result : 1;
@@ -147,10 +148,36 @@ const Filesystem::MountInfo *Filesystem::find_mount(File *file) const {
   return nullptr;
 }
 
+int Filesystem::hard_link(const char *source, const char *destination) {
+  IRQGuard guard;
+  int error;
+  File *file = path(source, &error, false);
+  if (!file) return error;
+  if (file->getType() == TYPE_DIRECTORY) return -1;
+  char leaf[File::kMaxNameLength + 1];
+  File *parent = resolve(destination, leaf, sizeof(leaf), false, &error);
+  if (!parent) return error;
+  const MountInfo *mount = find_mount(parent);
+  if (mount != find_mount(file)) return -18;
+  return mount ? mount->driver->link(*file, *parent, leaf) : -30;
+}
+
+int Filesystem::symlink(const char *target, const char *destination) {
+  IRQGuard guard;
+  if (!target || !*target) return -2;
+  if ((u32)strlen(target) >= kMaxPathLength) return -36;
+  int error;
+  char leaf[File::kMaxNameLength + 1];
+  File *parent = resolve(destination, leaf, sizeof(leaf), false, &error);
+  if (!parent) return error;
+  const MountInfo *mount = find_mount(parent);
+  return mount ? mount->driver->symlink(*parent, leaf, target) : -30;
+}
+
 int Filesystem::mkdir(const char *path, u32 mode) {
   IRQGuard guard;
   int error;
-  if (this->path(path, &error)) return -17;
+  if (this->path(path, &error, false)) return -17;
   if (error != -2) return error;
   char leaf[File::kMaxNameLength + 1];
   File *parent = resolve(path, leaf, sizeof(leaf), true, &error);
@@ -182,7 +209,8 @@ int Filesystem::rmdir(const char *path) {
   return parent->removeDirectory(leaf);
 }
 
-File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, int *error)
+File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, int *error,
+                          Lookup lookup)
 {
   if (error) *error = -2;
   if (fname && size) fname[0] = '\0';
@@ -191,7 +219,10 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, i
   u32 length = 0;
   while (p[length])
   {
-    if (++length >= kMaxPathLength) return nullptr;
+    if (++length >= kMaxPathLength) {
+      if (error) *error = -36;
+      return nullptr;
+    }
   }
 
   File *fp = root;
@@ -201,6 +232,11 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, i
     if (current) fp = current;
   }
 
+  struct PathBuffers {
+    char *data = nullptr;
+    ~PathBuffers() { if (data) kfree(data); }
+  } buffers;
+  char *expanded = nullptr;
   u32 links = 0;
   while (*p)
   {
@@ -215,14 +251,17 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, i
     u32 count = 0;
     while (*p && *p != '/')
     {
-      if (count == File::kMaxNameLength) return nullptr;
+      if (count == File::kMaxNameLength) {
+        if (error) *error = -36;
+        return nullptr;
+      }
       name[count++] = *p++;
     }
     name[count] = '\0';
 
     const char *remaining = p;
     while (*remaining == '/') ++remaining;
-    if (fname && !*remaining && (!*p || trailing))
+    if (fname && lookup != Lookup::Create && !*remaining && (!*p || trailing))
     {
       if (count + 1 > size || !strcmp(name, ".") || !strcmp(name, ".."))
         return nullptr;
@@ -238,13 +277,49 @@ File *Filesystem::resolve(const char *p, char *fname, u32 size, bool trailing, i
     else if (strcmp(name, "."))
     {
       fp->scan();
-      fp = fp->find(name);
-      while (fp && fp->getType() == TYPE_LINK)
-      {
-        if (++links > 32) return nullptr;
-        fp = fp->getLink();
+      File *child = fp->find(name);
+      if (lookup == Lookup::Create && !child && !*p && count + 1 <= size) {
+        memcpy(fname, name, count + 1);
+        if (error) *error = 0;
+        return fp;
       }
-      if (!fp) return nullptr;
+      while (child && (child->getType() == TYPE_LINK ||
+                       (child->getType() == TYPE_SYMLINK && (lookup != Lookup::NoFollow || *p)))) {
+        if (++links > 32) {
+          if (error) *error = -40;
+          return nullptr;
+        }
+        if (child->getType() == TYPE_LINK) {
+          child = child->getLink();
+          continue;
+        }
+        if (!buffers.data) {
+          buffers.data = (char *)kmalloc(2 * kMaxPathLength);
+          if (!buffers.data) {
+            if (error) *error = -12;
+            return nullptr;
+          }
+        }
+        char *next = expanded == buffers.data ? buffers.data + kMaxPathLength : buffers.data;
+        int target = child->readLink(next, kMaxPathLength - 1);
+        if (target <= 0) {
+          if (error) *error = target ? target : -2;
+          return nullptr;
+        }
+        u32 suffix = strlen(p);
+        if ((u32)target + suffix >= kMaxPathLength) {
+          if (error) *error = -36;
+          return nullptr;
+        }
+        memcpy(next + target, p, suffix + 1);
+        fp = *next == '/' ? root : child->getParent();
+        if (!fp) return nullptr;
+        p = expanded = next;
+        child = fp;
+        break;
+      }
+      if (!child) return nullptr;
+      fp = child;
     }
   }
 

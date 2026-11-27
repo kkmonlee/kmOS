@@ -45,17 +45,39 @@ void call_unlink() {
   arch.setRet(result ? result : fsm.unlink(path));
 }
 
-void call_rename() {
+static void call_two_paths(int (Filesystem::*operation)(const char *, const char *)) {
   char *paths = (char *)kmalloc(2 * Filesystem::kMaxPathLength);
   if (!paths) { arch.setRet((u32)-12); return; }
   char *destination = paths + Filesystem::kMaxPathLength;
   page_directory *pd = arch.pcurrent->getPInfo()->pd;
   int error = vmm.user_string(pd, arch.getArg(0), paths, Filesystem::kMaxPathLength);
   if (!error) error = vmm.user_string(pd, arch.getArg(1), destination, Filesystem::kMaxPathLength);
-  int result = error ? error : fsm.rename(paths, destination);
+  int result = error ? error : (fsm.*operation)(paths, destination);
   kfree(paths);
   if (bad_pointer(error != -14)) return;
   arch.setRet(result);
+}
+
+void call_rename() { call_two_paths(&Filesystem::rename); }
+void call_link() { call_two_paths(&Filesystem::hard_link); }
+void call_symlink() { call_two_paths(&Filesystem::symlink); }
+
+void call_readlink() {
+  char buffer[Filesystem::kMaxPathLength];
+  page_directory *pd = arch.pcurrent->getPInfo()->pd;
+  int error = vmm.user_string(pd, arch.getArg(0), buffer, sizeof(buffer));
+  if (bad_pointer(error != -14)) return;
+  if (error) { arch.setRet(error); return; }
+  u32 size = arch.getArg(2);
+  if (!size || (s32)size < 0) { arch.setRet((u32)-22); return; }
+  File *file = fsm.path(buffer, &error, false);
+  if (!file) { arch.setRet(error); return; }
+  int count = file->readLink(buffer, size < sizeof(buffer) ? size : sizeof(buffer));
+  if (count > 0 && !vmm.copy_to_user(pd, arch.getArg(1), buffer, count, &error)) {
+    if (!bad_pointer(error != -14)) arch.setRet(error);
+    return;
+  }
+  arch.setRet(count);
 }
 
 void call_ftruncate() {
@@ -128,15 +150,18 @@ static void return_stat(File *file, u32 address) {
   arch.setRet(0);
 }
 
-void call_stat() {
+static void stat_path(bool follow) {
   char path[Filesystem::kMaxPathLength];
   int error = vmm.user_string(arch.pcurrent->getPInfo()->pd, arch.getArg(0), path, sizeof(path));
   if (bad_pointer(error != -14)) return;
   if (error) { arch.setRet(error); return; }
-  File *file = fsm.path(path, &error);
+  File *file = fsm.path(path, &error, follow);
   if (!file) { arch.setRet(error); return; }
   return_stat(file, arch.getArg(1));
 }
+
+void call_stat() { stat_path(true); }
+void call_lstat() { stat_path(false); }
 
 void call_fstat() {
   File *file = arch.pcurrent->getFile(arch.getArg(0));

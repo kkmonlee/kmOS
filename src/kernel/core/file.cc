@@ -244,7 +244,8 @@ static u32 directory_type(u8 type) {
   case TYPE_FILE: return DT_REG;
   case TYPE_DIRECTORY: return DT_DIR;
   case TYPE_DEVICE: return DT_CHR;
-  case TYPE_LINK: return DT_LNK;
+  case TYPE_LINK:
+  case TYPE_SYMLINK: return DT_LNK;
   case TYPE_PIPE: return DT_FIFO;
   default: return DT_UNKNOWN;
   }

@@ -13,7 +13,8 @@ enum
   TYPE_DEVICE,
   TYPE_PROCESS,
   TYPE_LINK,
-  TYPE_PIPE
+  TYPE_PIPE,
+  TYPE_SYMLINK
 };
 
 class File
@@ -31,6 +32,7 @@ public:
   virtual u32 append(u8 *buffer, u32 size, u32 &end);
   virtual int readDirectory(u64 &position, struct dirent *entries, u32 count);
   virtual int stat(struct stat &result);
+  virtual int readLink(char *, u32) { return -22; }
   virtual u32 ioctl(u32 id, u8 *buffer);
   virtual int createFile(const char *name, u32 mode, File *&file);
   virtual int unlinkFile(const char *name);

@@ -106,6 +106,103 @@ static void rename_entries(void) {
     CHECK(rename("/mnt/disk", "/mnt/other") == -16 && chdir("/") == 0);
 }
 
+static void check_link(const char *path, const char *target) {
+    char buffer[4096];
+    int size = 0;
+    while (target[size]) ++size;
+    buffer[size] = '!';
+    CHECK(readlink(path, buffer, sizeof(buffer)) == size && buffer[size] == '!');
+    for (int i = 0; i < size; ++i) CHECK(buffer[i] == target[i]);
+}
+
+static void check_byte(const char *path, char value) {
+    int fd = open(path, O_RDONLY);
+    char byte;
+    CHECK(fd >= 0 && read(fd, &byte, 1) == 1 && byte == value && close(fd) == 0);
+}
+
+static void verify_links(void) {
+    CHECK(chdir("/mnt/disk") == 0);
+    CHECK(mkdir("links", 0755) == 0 && mkdir("links/sub", 0755) == 0);
+    CHECK(chdir("links") == 0);
+    int fd = open("data", O_CREAT | O_EXCL | O_RDWR, 0644);
+    CHECK(fd >= 0 && write(fd, "a", 1) == 1);
+    CHECK(link("data", "sub/data") == 0 && link("data", "sub/data") == -17);
+    CHECK(link("data", "/sys/env/data") == -18 && link("sub", "dir-hardlink") == -1);
+    struct stat original, alias;
+    CHECK(fstat(fd, &original) == 0 && stat("sub/data", &alias) == 0);
+    CHECK(original.st_ino == alias.st_ino && alias.st_nlink == 2);
+    int second = open("sub/data", O_WRONLY | O_APPEND);
+    CHECK(second >= 0 && write(second, "b", 1) == 1 && close(second) == 0);
+    CHECK(unlink("data") == 0 && fstat(fd, &alias) == 0 && alias.st_nlink == 1 && alias.st_size == 2);
+    char bytes[2];
+    CHECK(lseek(fd, 0, SEEK_SET) == 0 && read(fd, bytes, 2) == 2 && bytes[0] == 'a' && bytes[1] == 'b');
+    CHECK(close(fd) == 0);
+
+    CHECK(symlink("sub/data", "relative") == 0);
+    CHECK(symlink("/mnt/disk/links/sub/data", "absolute") == 0);
+    CHECK(symlink("sub", "directory") == 0);
+    CHECK(link("relative", "relative-alias") == 0);
+    CHECK(lstat("relative", &original) == 0 && lstat("relative-alias", &alias) == 0);
+    CHECK(S_ISLNK(original.st_mode) && original.st_blocks == 0 && alias.st_nlink == 2 &&
+          original.st_ino == alias.st_ino);
+    CHECK(stat("relative", &alias) == 0 && S_ISREG(alias.st_mode) && alias.st_ino != original.st_ino);
+    CHECK(lstat("directory/", &alias) == 0 && S_ISDIR(alias.st_mode));
+    CHECK(rmdir("directory") == -20 && unlink("directory/") < 0);
+    CHECK(readlink("relative", bytes, sizeof(bytes)) == 2 && bytes[0] == 's' && bytes[1] == 'u');
+    CHECK(readlink("sub/data", bytes, 2) == -22 && readlink("relative", bytes, 0) == -22);
+    CHECK(symlink("../relative", "sub/up") == 0);
+    check_byte("directory/up", 'a');
+    check_byte("absolute", 'a');
+    check_link("../has-link/unknown", "target");
+
+    char long_target[1025];
+    for (u32 i = 0; i < sizeof(long_target) - 1; i += 2) {
+        long_target[i] = '.';
+        long_target[i + 1] = '/';
+    }
+    long_target[1024] = 0;
+    CHECK(stat(".", &alias) == 0);
+    if (alias.st_blksize == 1024) CHECK(symlink(long_target, "too-long") == -36);
+    long_target[1023] = 0;
+    CHECK(symlink(long_target, "long") == 0);
+    CHECK(lstat("long", &alias) == 0 && alias.st_size == 1023 && alias.st_blocks > 0);
+    check_link("long", long_target);
+    check_byte("long/sub/data", 'a');
+    CHECK(symlink(long_target, "remove-long") == 0 && unlink("remove-long") == 0);
+    CHECK(symlink("sub/data", "remove-short") == 0 && unlink("remove-short") == 0);
+
+    CHECK(symlink("created", "dangling") == 0);
+    CHECK(lstat("dangling", &alias) == 0 && stat("dangling", &alias) == -2);
+    CHECK(open("dangling", O_CREAT | O_EXCL | O_RDWR, 0644) == -17);
+    fd = open("dangling", O_CREAT | O_RDWR, 0644);
+    CHECK(fd >= 0 && write(fd, "c", 1) == 1 && close(fd) == 0);
+    check_byte("created", 'c');
+    CHECK(symlink("loop2", "loop1") == 0 && symlink("loop1", "loop2") == 0);
+    CHECK(stat("loop1", &alias) == -40 && open("loop2", O_RDONLY) == -40);
+    check_link("loop1", "loop2");
+    CHECK(rename("relative", "created") == 0 && lstat("created", &alias) == 0 && S_ISLNK(alias.st_mode));
+    CHECK(rename("sub/data", "absolute") == 0 && lstat("absolute", &alias) == 0 && S_ISREG(alias.st_mode));
+    CHECK(link("absolute", "persistent") == 0);
+    CHECK(rename("created", "sub/data") == 0 && unlink("relative-alias") == 0);
+    CHECK(lstat("sub/data", &alias) == 0 && alias.st_nlink == 1 && stat("sub/data", &alias) == -2);
+    CHECK(chdir("/") == 0);
+}
+
+static void verify_persisted_links(void) {
+    CHECK(chdir("/mnt/disk/links") == 0);
+    struct stat info, original;
+    CHECK(lstat("sub/data", &info) == 0 && S_ISLNK(info.st_mode) && info.st_nlink == 1);
+    check_link("sub/data", "sub/data");
+    CHECK(stat("sub/data", &info) == -2 && stat("loop1", &info) == -40);
+    CHECK(lstat("long", &info) == 0 && info.st_size == 1023 && info.st_blocks > 0);
+    check_byte("long/absolute", 'a');
+    CHECK(stat("absolute", &original) == 0 && stat("persistent", &info) == 0 &&
+          original.st_ino == info.st_ino && info.st_nlink == 2);
+    CHECK(link("absolute", "denied-hard") == -30 && symlink("absolute", "denied-sym") == -30);
+    CHECK(chdir("/") == 0);
+}
+
 int main(void) {
     int done = open("/mnt/disk/done", O_RDONLY);
     if (done >= 0) {
@@ -124,6 +221,7 @@ int main(void) {
         int moved = open("/mnt/disk/moves/target", O_RDONLY);
         CHECK(moved >= 0 && read(moved, buffer, sizeof(buffer)) == 3 &&
               buffer[0] == 'n' && close(moved) == 0);
+        verify_persisted_links();
         puts("directories verified after reboot\n");
         return 0;
     }
@@ -143,6 +241,7 @@ int main(void) {
     held_directories();
     deep_removed_directories();
     rename_entries();
+    verify_links();
 
     char name[266] = "/mnt/disk/";
     for (int i = 0; i < 255; ++i) name[10 + i] = 'a' + i % 26;

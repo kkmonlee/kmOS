@@ -152,12 +152,21 @@ private:
     bool blocks_validated_ = false;
 };
 
+class Ext2Symlink : public Ext2Node {
+public:
+    Ext2Symlink(const char *name, Ext2Mount *mount, u32 inode)
+        : Ext2Node(name, TYPE_SYMLINK, mount, inode) {}
+    int readLink(char *buffer, u32 size) override;
+};
+
 class Ext2Filesystem : public FilesystemDriver {
 public:
     Ext2Filesystem();
     virtual const char* name() const override;
     virtual File* mount(File* mount_point, BlockDevice* device, bool writable) override;
     int rename(File &file, File &directory, const char *name) override;
+    int link(File &file, File &directory, const char *name) override;
+    int symlink(File &directory, const char *name, const char *target) override;
 };
 
 extern Ext2Filesystem ext2_driver;

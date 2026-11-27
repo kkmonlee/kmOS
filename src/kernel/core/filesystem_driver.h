@@ -12,6 +12,8 @@ public:
     virtual const char* name() const = 0;
     virtual File* mount(File* mount_point, BlockDevice* device, bool writable) = 0;
     virtual int rename(File &, File &, const char *) { return -30; }
+    virtual int link(File &, File &, const char *) { return -30; }
+    virtual int symlink(File &, const char *, const char *) { return -30; }
 };
 
 #endif

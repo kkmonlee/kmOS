@@ -36,10 +36,20 @@ static inline int unlink(const char *path) { return syscall3(17, (u32)path, 0, 0
 static inline int rename(const char *source, const char *destination) {
     return syscall3(38, (u32)source, (u32)destination, 0);
 }
+static inline int link(const char *source, const char *destination) {
+    return syscall3(18, (u32)source, (u32)destination, 0);
+}
+static inline int symlink(const char *target, const char *destination) {
+    return syscall3(83, (u32)target, (u32)destination, 0);
+}
+static inline int readlink(const char *path, char *buffer, u32 size) {
+    return syscall3(85, (u32)path, (u32)buffer, size);
+}
 static inline int ftruncate(int fd, int size) { return syscall3(93, fd, size, 0); }
 static inline int lseek(int fd, int offset, int origin) { return syscall3(19, fd, offset, origin); }
 static inline int getdents(int fd, struct dirent *entries, u32 bytes) { return syscall3(89, fd, (u32)entries, bytes); }
 static inline int stat(const char *path, struct stat *result) { return syscall3(106, (u32)path, (u32)result, 0); }
+static inline int lstat(const char *path, struct stat *result) { return syscall3(107, (u32)path, (u32)result, 0); }
 static inline int fstat(int fd, struct stat *result) { return syscall3(108, fd, (u32)result, 0); }
 static inline int close(int fd) { return syscall3(6, fd, 0, 0); }
 static inline int read(int fd, void *buffer, u32 count) { return syscall3(3, fd, (u32)buffer, count); }
