@@ -489,6 +489,7 @@ static int run_builtin(Command *command, enum builtin builtin) {
         puts("cd [dir], pwd, echo [text], kill pid, jobs, fg [%job], bg [%job], exit\n");
         puts("mkdir [-p] dir..., rmdir dir..., rm [-f] file...\n");
         puts("cp source... destination, mv source... destination\n");
+        puts("ln [-s] source... destination, readlink path\n");
         break;
     case JOBS:
         reap_jobs();

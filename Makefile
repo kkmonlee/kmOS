@@ -3,7 +3,7 @@ QEMU ?= qemu-system-i386
 WERROR ?= 0
 RAM ?= 64M
 KERNEL = src/kernel/kernel.elf
-USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf,src/userland/sh.elf,src/userland/ls.elf,src/userland/mkdir.elf,src/userland/rmdir.elf,src/userland/rm.elf,src/userland/cp.elf,src/userland/mv.elf
+USER_PROGRAM = src/userland/init.elf,src/userland/hello.elf,src/userland/cat.elf,src/userland/sh.elf,src/userland/ls.elf,src/userland/mkdir.elf,src/userland/rmdir.elf,src/userland/rm.elf,src/userland/cp.elf,src/userland/mv.elf,src/userland/ln.elf,src/userland/readlink.elf
 comma := ,
 QEMU_ARGS = user $(if $(filter 1,$(USER_SHELL)),usershell) $(if $(DISK),disk=hda$(if $(filter 1,$(DISK_RW)),$(comma)rw)) $(if $(SWAP),swap=hdb)
 QEMU_HDA = -drive "file=$(DISK),format=raw,if=ide,index=0"

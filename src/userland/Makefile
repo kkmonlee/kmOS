@@ -1,5 +1,5 @@
 CROSS ?= i686-elf
-PROGRAMS = hello.elf init.elf cat.elf sh.elf ls.elf mkdir.elf rmdir.elf rm.elf cp.elf mv.elf
+PROGRAMS = hello.elf init.elf cat.elf sh.elf ls.elf mkdir.elf rmdir.elf rm.elf cp.elf mv.elf ln.elf readlink.elf
 CFLAGS = -std=c11 -m32 -Os -g -Wall -Wextra -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector
 ASMFLAGS = -f elf32
 LDFLAGS = -m elf_i386 -z noexecstack -T linker.ld
@@ -22,7 +22,7 @@ all: $(PROGRAMS)
 hello.elf: hello.o linker.ld
 	$(CROSS)-ld $(LDFLAGS) -o $@ hello.o
 
-mkdir.o rmdir.o rm.o cp.o mv.o: file_command.h
+mkdir.o rmdir.o rm.o cp.o mv.o ln.o readlink.o: file_command.h
 
 $(filter-out hello.elf,$(PROGRAMS)): %.elf: %.o start.o alloc.o linker.ld
 	$(CROSS)-ld $(LDFLAGS) -o $@ start.o alloc.o $*.o

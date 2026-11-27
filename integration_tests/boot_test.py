@@ -154,7 +154,7 @@ def boot(args, ram, machine="pc"):
             assert all(value in vm.text() for value in ("Starting userland", "Hello from ring 3",
                                                       "kmOS userland", "[USER] Reaped init")), vm.text()
             listing = vm.serial_command("ls /bin").split("ls /bin\n")[-1]
-            for name in ("ls", "mkdir", "rmdir", "rm", "cp", "mv"):
+            for name in ("ls", "mkdir", "rmdir", "rm", "cp", "mv", "ln", "readlink"):
                 assert re.search(rf"\b{name}\b", listing), listing
         registers = vm.monitor("info registers")
         cr0 = int(re.search(r"CR0=([0-9a-fA-F]+)", registers)[1], 16)
@@ -545,7 +545,8 @@ def file_commands(args, temp):
                                  capture_output=True, text=True)
     assert permissions.returncode == 0, permissions.stdout + permissions.stderr
     userland = Path(__file__).resolve().parents[1] / "src/userland"
-    modules = ",".join(str(userland / f"{name}.elf") for name in ("cat", "sh", "ls", "mkdir", "rmdir", "rm", "cp", "mv"))
+    names = ("cat", "sh", "ls", "mkdir", "rmdir", "rm", "cp", "mv", "ln", "readlink")
+    modules = ",".join(str(userland / f"{name}.elf") for name in names)
     for mode in ("rw", "ro"):
         mount = "disk=hda,rw" if mode == "rw" else "disk=hda"
         with VM(args, f"file-commands-{mode}", append=f"user usershell {mount}", module=modules, disk=disk) as vm:
@@ -562,12 +563,19 @@ def file_commands(args, temp):
                              "mkdir first second", "mkdir -- -empty", "echo data >-file",
                              "mkdir -p saved/sub", "echo saved >saved/file",
                              "echo stale contents >copy", "cp saved/file copy", "mv copy saved/sub",
-                             "cp payload saved/file saved/sub"):
+                             "cp payload saved/file saved/sub", "ln saved/file hard",
+                             "ln -s ../file saved/sub/soft", "ln -s absent dangling"):
                     assert command(line) == line + "\nsh$ ", line
                 assert "\nnested\n" in command("ls tree/inner")
                 assert "cp: saved/file: source and destination are the same file" in command("cp saved/file saved/file")
                 assert "\nsaved\n" in command("cat saved/sub/copy")
                 assert "\n-rw------- 1 0 0 8448 saved/sub/payload\n" in command("ls -l saved/sub/payload")
+                assert "\n-rw-rw-rw- 2 0 0 6 hard\n" in command("ls -l hard")
+                assert "\nlrwxrwxrwx 1 0 0 7 saved/sub/soft -> ../file\n" in command("ls -l saved/sub/soft")
+                assert "\nlrwxrwxrwx 1 0 0 6 dangling -> absent\n" in command("ls -l dangling")
+                assert "\n../file\n" in command("readlink saved/sub/soft")
+                assert "\nsaved\n" in command("cat saved/sub/soft")
+                assert "ln: /sys/env/hard: cross-filesystem link" in command("ln saved/file /sys/env/hard")
                 assert "mv: saved/sub/copy: cross-filesystem move" in command("mv saved/sub/copy /sys/env/copy")
                 assert "ls: cannot stat: copy" in command("ls copy")
                 assert "mkdir: saved/file/child: not a directory" in command("mkdir -p saved/file/child")
@@ -589,7 +597,11 @@ def file_commands(args, temp):
                 assert "rm: saved/file: read-only filesystem" in command("rm -f saved/file")
                 assert "mv: saved/file: read-only filesystem" in command("mv saved/file denied")
                 assert "cp: denied: read-only filesystem" in command("cp saved/file denied")
+                assert "ln: denied: read-only filesystem" in command("ln saved/file denied")
+                assert "ln: denied: read-only filesystem" in command("ln -s saved/file denied")
                 assert "\nsaved\n" in command("cat saved/file")
+                assert "\nsaved\n" in command("cat hard")
+                assert "\n../file\n" in command("readlink saved/sub/soft")
             vm.send_serial(b"exit\n")
             text = vm.wait(lambda text: "kmOS:/$ " in text)
             assert "[USER] Reaped sh" in text and "Frame leak" not in text and "[PANIC]" not in text, text
@@ -597,7 +609,7 @@ def file_commands(args, temp):
     assert checked.returncode == 0, checked.stdout + checked.stderr
     copied = subprocess.run(["debugfs", "-R", "cat /saved/sub/payload", str(disk)], capture_output=True)
     assert copied.returncode == 0 and copied.stdout == data, copied.stderr
-    print("PASS userspace mkdir, rmdir, rm, cp and mv on writable and read-only ext2", flush=True)
+    print("PASS userspace file commands and links on writable and read-only ext2", flush=True)
 
 
 def directory_listing(args, temp):

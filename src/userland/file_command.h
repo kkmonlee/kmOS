@@ -29,6 +29,7 @@ static inline int file_message(const char *command, const char *path, const char
 static inline int file_error(const char *command, const char *path, int error) {
     const char *message;
     switch (error) {
+    case -1: message = "operation not permitted"; break;
     case -2: message = "no such file or directory"; break;
     case -5: message = "I/O error"; break;
     case -13: message = "permission denied"; break;
@@ -41,8 +42,10 @@ static inline int file_error(const char *command, const char *path, int error) {
     case -27: message = "file too large"; break;
     case -28: message = "no space left"; break;
     case -30: message = "read-only filesystem"; break;
+    case -31: message = "too many links"; break;
     case -36: message = "path too long"; break;
     case -39: message = "directory not empty"; break;
+    case -40: message = "too many symbolic links"; break;
     default: message = "operation failed"; break;
     }
     return file_message(command, path, message);
@@ -69,15 +72,8 @@ static inline int file_target(const char *directory, const char *source, char *p
     return 0;
 }
 
-static inline int transfer_files(int argc, char **argv, const char *command,
+static inline int transfer_paths(int argc, char **argv, int first, const char *command,
                                  int (*transfer)(const char *, const char *)) {
-    int first = file_operands(argc, argv, 0, 0);
-    if (first < 0 || argc - first < 2) {
-        write_text(2, "usage: ");
-        write_text(2, command);
-        write_text(2, " [--] source ... destination\n");
-        return 2;
-    }
     const char *destination = argv[argc - 1];
     struct stat info;
     int result = stat(destination, &info);
@@ -100,6 +96,18 @@ static inline int transfer_files(int argc, char **argv, const char *command,
         if (transfer(argv[i], target)) status = 1;
     }
     return status;
+}
+
+static inline int transfer_files(int argc, char **argv, const char *command,
+                                 int (*transfer)(const char *, const char *)) {
+    int first = file_operands(argc, argv, 0, 0);
+    if (first < 0 || argc - first < 2) {
+        write_text(2, "usage: ");
+        write_text(2, command);
+        write_text(2, " [--] source ... destination\n");
+        return 2;
+    }
+    return transfer_paths(argc, argv, first, command, transfer);
 }
 
 #endif

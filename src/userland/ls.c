@@ -25,7 +25,7 @@ static int number(u32 value) {
     return write_all(1, digits + index, sizeof(digits) - index);
 }
 
-static int print_long(const struct stat *info, const char *name) {
+static int print_long(const struct stat *info, const char *name, const char *path) {
     char mode[] = "---------- ";
     switch (info->st_mode & S_IFMT) {
     case S_IFDIR: mode[0] = 'd'; break;
@@ -39,9 +39,19 @@ static int print_long(const struct stat *info, const char *name) {
     if (info->st_mode & 04000) mode[3] = mode[3] == 'x' ? 's' : 'S';
     if (info->st_mode & 02000) mode[6] = mode[6] == 'x' ? 's' : 'S';
     if (info->st_mode & 01000) mode[9] = mode[9] == 'x' ? 't' : 'T';
-    return write_all(1, mode, sizeof(mode) - 1) || number(info->st_nlink) || puts(" ") ||
-           number(info->st_uid) || puts(" ") || number(info->st_gid) || puts(" ") ||
-           number(info->st_size) || puts(" ") || puts(name) || puts("\n");
+    if (write_all(1, mode, sizeof(mode) - 1) || number(info->st_nlink) || puts(" ") ||
+        number(info->st_uid) || puts(" ") || number(info->st_gid) || puts(" ") ||
+        number(info->st_size) || puts(" ") || puts(name)) return 1;
+    if (S_ISLNK(info->st_mode)) {
+        char target[4096];
+        int count = readlink(path, target, sizeof(target));
+        if (count < 0) {
+            puts("\n");
+            return error("cannot read link", path);
+        }
+        if (puts(" -> ") || write_all(1, target, count)) return 1;
+    }
+    return puts("\n");
 }
 
 static int list_directory(const char *path, int all, int details) {
@@ -76,8 +86,8 @@ static int list_directory(const char *path, int all, int details) {
             }
             for (u32 j = 0; j <= size; ++j) entry_path[prefix + j] = name[j];
             struct stat info;
-            if (stat(entry_path, &info)) result = error("cannot stat", entry_path);
-            else if (print_long(&info, name)) result = 1;
+            if (lstat(entry_path, &info)) result = error("cannot stat", entry_path);
+            else if (print_long(&info, name, entry_path)) result = 1;
         }
     }
     if (bytes < 0) result = error("cannot read directory", path);
@@ -87,9 +97,11 @@ static int list_directory(const char *path, int all, int details) {
 
 static int list(const char *path, int all, int details) {
     struct stat info;
-    if (stat(path, &info)) return error("cannot stat", path);
+    if (lstat(path, &info)) return error("cannot stat", path);
+    if (!details && S_ISLNK(info.st_mode) && !stat(path, &info) && S_ISDIR(info.st_mode))
+        return list_directory(path, all, details);
     if (S_ISDIR(info.st_mode)) return list_directory(path, all, details);
-    if (details) return print_long(&info, path);
+    if (details) return print_long(&info, path, path);
     return puts(path) || puts("\n");
 }
 
