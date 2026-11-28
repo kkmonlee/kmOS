@@ -1,6 +1,6 @@
 #include <os.h>
 #include <swap.h>
-#include <ata.h>
+#include <disk.h>
 #include <architecture.h>
 #include <serial.h>
 #include <vmm.h>
@@ -17,11 +17,13 @@ SwapManager swap_manager;
 
 class SwapDiskFile : public File {
 public:
-    SwapDiskFile() : File("hdb", TYPE_FILE), disk("hdb", 0x1f0, 0x3f6, 1, false) {}
+    SwapDiskFile() : File("hdb", TYPE_FILE) {}
+    ~SwapDiskFile() override { delete disk; }
 
     bool initialize() {
-        if (!disk.initialize()) return false;
-        u32 pages = disk.identify().total_sectors / (PAGESIZE / disk.get_block_size());
+        disk = open_disk(1);
+        if (!disk) return false;
+        u32 pages = disk->sector_count() / (PAGESIZE / DiskDevice::sector_size);
         if (pages < 2 || pages > slots_per_device + 1) return false;
         setSize(pages * PAGESIZE);
         return true;
@@ -32,23 +34,23 @@ public:
 
     u32 read(u32 pos, u8 *buffer, u32 count) override {
         if (!valid_range(pos, count)) return (u32)-22;
-        return disk.read_blocks(pos / disk.get_block_size(), count / disk.get_block_size(), buffer)
+        return disk->read_blocks(pos / DiskDevice::sector_size, count / DiskDevice::sector_size, buffer)
             == RETURN_OK ? count : (u32)-5;
     }
 
     u32 write(u32 pos, u8 *buffer, u32 count) override {
         if (!valid_range(pos, count)) return (u32)-22;
-        return disk.write_blocks(pos / disk.get_block_size(), count / disk.get_block_size(), buffer)
+        return disk->write_blocks(pos / DiskDevice::sector_size, count / DiskDevice::sector_size, buffer)
             == RETURN_OK ? count : (u32)-5;
     }
 
 private:
     bool valid_range(u32 pos, u32 count) {
-        return !(pos % disk.get_block_size()) && !(count % disk.get_block_size()) &&
+        return !(pos % DiskDevice::sector_size) && !(count % DiskDevice::sector_size) &&
             pos < getSize() && count <= getSize() - pos;
     }
 
-    ATADevice disk;
+    DiskDevice *disk = nullptr;
 };
 
 void init_swap(const multiboot_info *boot) {

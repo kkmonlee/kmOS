@@ -1,10 +1,9 @@
 #include <os.h>
 #include <arch/x86/ata.h>
-#include <arch/x86/io.h>
-#include <arch/x86/pit.h>
+#include <arch/x86/storage_timeout.h>
 #include <runtime/alloc.h>
 
-extern IO io;
+DiskDevice *open_ahci_disk(u8 index, const char *name, bool publish);
 
 namespace {
 
@@ -31,39 +30,6 @@ constexpr u8 ATA_SR_BSY = 0x80;
 
 constexpr u32 ATA_SECTOR_SIZE = 512;
 constexpr u32 ATA_LBA_LIMIT = 1U << 28;
-constexpr u16 SPEAKER_PORT = 0x61;
-constexpr u8 PIT_CHANNEL2_OUTPUT = 0x20;
-constexpr u16 ATA_POLL_TICKS = PIT_BASE_FREQ / 20;
-constexpr u32 ATA_TIMEOUT_PERIODS = 5 * 20;
-
-class ATATimeout {
-public:
-    ATATimeout() : speaker_(io.inb(SPEAKER_PORT)), remaining_(ATA_TIMEOUT_PERIODS) {
-        arm();
-    }
-
-    ~ATATimeout() { io.outb(SPEAKER_PORT, speaker_); }
-
-    bool expired() {
-        if (!(io.inb(SPEAKER_PORT) & PIT_CHANNEL2_OUTPUT)) return false;
-        if (!--remaining_) return true;
-        arm();
-        return false;
-    }
-
-private:
-    void arm() {
-        u8 speaker = speaker_ & ~3;
-        io.outb(SPEAKER_PORT, speaker);
-        io.outb(PIT_COMMAND, 0xb0);
-        io.outb(PIT_CHANNEL2, (u8)ATA_POLL_TICKS);
-        io.outb(PIT_CHANNEL2, (u8)(ATA_POLL_TICKS >> 8));
-        io.outb(SPEAKER_PORT, speaker | 1);
-    }
-
-    u8 speaker_;
-    u32 remaining_;
-};
 
 static void ata_io_wait(u16 ctrl_base) {
     for (u32 i = 0; i < 15; ++i) io.inb(ctrl_base);
@@ -79,7 +45,7 @@ static void serial_print_ata(const char* str) {
 }
 
 ATADevice::ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave, bool publish)
-    : BlockDevice(name, ATA_SECTOR_SIZE, publish), io_base_(io_base), ctrl_base_(ctrl_base), slave_(slave) {
+    : DiskDevice(name, publish), io_base_(io_base), ctrl_base_(ctrl_base), slave_(slave) {
     identify_.model[0] = '\0';
     identify_.total_sectors = 0;
     identify_.present = false;
@@ -88,7 +54,7 @@ ATADevice::ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave, boo
 ATADevice::~ATADevice() = default;
 
 bool ATADevice::wait_status(u8 set, u8 clear, bool check_errors) {
-    ATATimeout timeout;
+    StorageTimeout timeout;
     do {
         u8 status = io.inb(ctrl_base_);
         if (!status || status == 0xff) return false;
@@ -169,11 +135,6 @@ bool ATADevice::initialize() {
     return true;
 }
 
-bool ATADevice::valid_range(u32 lba, u32 count) const {
-    return identify_.present && count && lba < identify_.total_sectors &&
-        count <= identify_.total_sectors - lba && count <= 0xffffffffU / ATA_SECTOR_SIZE;
-}
-
 u32 ATADevice::read_blocks(u32 lba, u32 count, void* buffer) {
     IRQGuard guard;
     if (!buffer || !valid_range(lba, count))
@@ -251,24 +212,12 @@ u32 ATADevice::write_blocks(u32 lba, u32 count, const void* buffer) {
     return RETURN_OK;
 }
 
-static ATADevice* g_primary_master = nullptr;
-
-ATADevice* ata_primary_master() {
-    return g_primary_master;
-}
-
-void ata_init(bool publish) {
-    if (g_primary_master) {
-        return;
-    }
-
-    ATADevice* dev = new ATADevice("hda", 0x1F0, 0x3F6, 0, publish);
-    if (dev && dev->initialize()) {
-        g_primary_master = dev;
-    } else {
-        if (dev) {
-            delete dev;
-        }
-        serial_print_ata("[ATA] Primary master initialization failed\n");
-    }
+DiskDevice *open_disk(u8 index, bool publish) {
+    if (index > 1) return nullptr;
+    const char *name = index ? "hdb" : "hda";
+    if (DiskDevice *disk = open_ahci_disk(index, name, publish)) return disk;
+    ATADevice *disk = new ATADevice(name, 0x1f0, 0x3f6, index, publish);
+    if (disk && disk->initialize()) return disk;
+    delete disk;
+    return nullptr;
 }

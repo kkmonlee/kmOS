@@ -57,7 +57,7 @@ void UnifiedAllocator::init(enum system_mode mode) {
     
     policy_mask = mode_policy(mode);
     
-    io.print("[UNIFIED] Policy mask: 0x%x\n", policy_mask);
+    io.print("[UNIFIED] Policy mask: %x\n", policy_mask);
 }
 
 void *UnifiedAllocator::alloc(u32 size, u32 flags) {
@@ -319,7 +319,7 @@ void UnifiedAllocator::free_pages(void *ptr, u32 /*order*/) {
 
 void UnifiedAllocator::set_policy(u32 new_policy_mask) {
     AllocationGuard guard;
-    io.print("[UNIFIED] Changing policy from 0x%x to 0x%x\n", policy_mask, new_policy_mask);
+    io.print("[UNIFIED] Changing policy from %x to %x\n", policy_mask, new_policy_mask);
     policy_mask = new_policy_mask;
     stats.policy_switches++;
 }

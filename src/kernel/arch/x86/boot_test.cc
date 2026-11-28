@@ -14,7 +14,7 @@ bool verify_storage_writes();
 bool verify_storage_removal();
 bool verify_storage_recovery(const char *arguments);
 bool verify_storage_directories();
-bool verify_ata();
+bool verify_disk();
 bool verify_swap();
 
 static void finish(bool passed) {
@@ -34,7 +34,7 @@ void run_filesystem_test(const multiboot_info *boot) {
     if (boot_has_argument((const char *)boot->cmdline, "test=storage-recovery"))
         finish(verify_storage_recovery((const char *)boot->cmdline));
     if (boot_has_argument((const char *)boot->cmdline, "test=storage-directories")) finish(verify_storage_directories());
-    if (boot_has_argument((const char *)boot->cmdline, "test=ata")) finish(verify_ata());
+    if (boot_has_argument((const char *)boot->cmdline, "test=ata")) finish(verify_disk());
     if (boot_has_argument((const char *)boot->cmdline, "test=swap")) finish(verify_swap());
 }
 

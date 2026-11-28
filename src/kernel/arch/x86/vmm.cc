@@ -250,6 +250,8 @@ int VMM::map_page(page_directory *pd, u32 address, u32 physical, u32 flags) {
     table[index].present = (flags & PG_PRESENT) != 0;
     table[index].writable = (flags & PG_WRITE) != 0;
     table[index].user = (flags & PG_USER) != 0;
+    table[index].write_through = (flags & PG_WRITE_THROUGH) != 0;
+    table[index].cache_disabled = (flags & PG_CACHE_DISABLE) != 0;
     table[index].cow = (flags & PG_COW) != 0;
     if (flags & PG_USER) pd->tables[VADDR_PD_OFFSET(address)].user = 1;
     invalidate_page(pd, address);

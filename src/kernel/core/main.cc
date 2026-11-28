@@ -1,6 +1,6 @@
 #include <os.h>
 #include <arch/x86/architecture.h>
-#include <arch/x86/ata.h>
+#include <arch/x86/disk.h>
 #include <arch/x86/keyboard.h>
 #include <arch/x86/pit.h>
 #include <arch/x86/serial.h>
@@ -29,12 +29,13 @@ static void mount_disk(const multiboot_info *boot) {
     bool writable = boot_has_argument(args, "disk=hda,rw");
     if (!writable && !boot_has_argument(args, "disk=hda")) return;
 
-    ata_init(false);
     File *mnt = fsm.path("/mnt");
     File *point = mnt ? mnt->createChild("disk", TYPE_DIRECTORY) : nullptr;
-    if (point && fsm.mount(ata_primary_master(), "/mnt/disk", "ext2", writable)) {
+    DiskDevice *disk = point ? open_disk(0) : nullptr;
+    if (disk && fsm.mount(disk, "/mnt/disk", "ext2", writable)) {
         serial::write(writable ? "[DISK] /mnt/disk mounted rw\n" : "[DISK] /mnt/disk mounted ro\n");
     } else {
+        delete disk;
         if (point) point->remove();
         serial::write("[DISK] Could not mount hda\n");
     }

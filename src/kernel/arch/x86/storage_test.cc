@@ -3,7 +3,7 @@
 #include <ext2.h>
 #include <block_device.h>
 #include <core/boot.h>
-#include <ata.h>
+#include <disk.h>
 #include <serial.h>
 
 #define CHECK(condition) do { if (!(condition)) { \
@@ -388,8 +388,7 @@ private:
 };
 
 bool verify_storage_recovery(const char *arguments) {
-    ata_init(false);
-    ATADevice *device = ata_primary_master();
+    DiskDevice *device = open_disk(0);
     CHECK(device);
     InterruptedDisk disk(*device);
     File *root = write_mount(&disk);
@@ -409,6 +408,7 @@ bool verify_storage_recovery(const char *arguments) {
     if (operation == IndirectChange::Close) file->release();
     root->remove();
     CHECK(!write_mount(&disk));
+    delete device;
     return true;
 }
 
@@ -615,11 +615,10 @@ bool verify_storage_directories() {
     return true;
 }
 
-bool verify_ata() {
-    ata_init();
-    ATADevice *disk = ata_primary_master();
-    CHECK(disk && disk->identify().total_sectors == 16);
-    u8 original[512], written[1024], read[1024];
+bool verify_disk() {
+    DiskDevice *disk = open_disk(0, true);
+    CHECK(disk && disk->sector_count() == 16);
+    u8 original[512], written[3072], read[3072];
     CHECK(disk->read_blocks(0, 1, original) == RETURN_OK);
     for (u32 i = 0; i < sizeof(original); ++i) CHECK(original[i] == 0x5a);
     for (u32 i = 0; i < sizeof(written); ++i) written[i] = (u8)(i * 17 + 3);
@@ -632,11 +631,12 @@ bool verify_ata() {
     CHECK(disk->write_blocks(0, 1, nullptr) == (u32)ERROR_PARAM);
     CHECK(disk->read_blocks(0, 1, read) == RETURN_OK);
     for (u32 i = 0; i < 512; ++i) CHECK(read[i] == original[i]);
-    CHECK(disk->write_blocks(1, 2, written) == RETURN_OK);
-    CHECK(disk->read_blocks(1, 2, read) == RETURN_OK);
+    CHECK(disk->write_blocks(1, 6, written) == RETURN_OK);
+    CHECK(disk->read_blocks(1, 6, read) == RETURN_OK);
     for (u32 i = 0; i < sizeof(read); ++i) CHECK(read[i] == written[i]);
     CHECK(disk->read_blocks(15, 1, read) == RETURN_OK);
     for (u32 i = 0; i < 512; ++i) CHECK(read[i] == 0x7b);
-    serial::write("[STORAGE] ATA bounds, transfers and flush verified\n");
+    delete disk;
+    serial::write("[STORAGE] Disk bounds, transfers and flush verified\n");
     return true;
 }

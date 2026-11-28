@@ -150,6 +150,7 @@ def boot(args, ram, machine="pc"):
         vm.wait(lambda text: "[BOOT] Ready" in text and "kmOS:/$ " in text)
         assert "[CPU] Exception frames verified" in vm.text()
         assert "[VMM] Page tables verified" in vm.text()
+        assert re.search(r"^\[UNIFIED\] Policy mask: 0x[0-9a-f]+$", vm.text(), re.MULTILINE), vm.text()
         if args.iso:
             assert all(value in vm.text() for value in ("Starting userland", "Hello from ring 3",
                                                       "kmOS userland", "[USER] Reaped init")), vm.text()
@@ -694,8 +695,8 @@ def user_heap(args, temp):
     print("PASS userspace heap growth, shrink, exhaustion and fork", flush=True)
 
 
-def disk_mount(args, temp):
-    disk = temp / "ext2.img"
+def disk_mount(args, temp, machine="pc"):
+    disk = temp / f"ext2-{machine}.img"
     block = 1024
     image = bytearray(16 * block)
     struct.pack_into("<11I", image, block, 16, 16, 0, 6, 5, 1, 0, 0, 16, 16, 16)
@@ -724,29 +725,33 @@ def disk_mount(args, temp):
 
     program = build_user_test(args, temp, "disk_test.c", "init")
     for mode, argument in (("rw", "disk=hda,rw"), ("ro", "disk=hda")):
-        with VM(args, f"disk-{mode}", append=f"user {argument}", module=program, disk=disk) as vm:
+        with VM(args, f"disk-{machine}-{mode}", machine=machine,
+                append=f"user {argument}", module=program, disk=disk) as vm:
             text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
             assert f"[DISK] /mnt/disk mounted {mode}" in text and "disk contents verified" in text, text
+            if machine == "q35":
+                assert "[AHCI] hda detected" in text, text
             assert "[USER] Exit status=00000000" in text and "[PANIC]" not in text, text
         image[8 * block:8 * block + 1028] = bytes(33 + i % 90 for i in range(1028))
         assert disk.read_bytes() == image, f"unexpected disk contents after {mode} boot"
-    print("PASS ext2 ATA mount, cross-block writes and read-only reboot", flush=True)
+    print(f"PASS ext2 mount, cross-block writes and read-only reboot: {machine}", flush=True)
 
     malformed = bytearray(image)
     struct.pack_into("<I", malformed, 5 * block + 10 * 128 + 44, 3)
     disk.write_bytes(malformed)
-    with VM(args, "disk-metadata", append="user disk=hda,rw", module=program, disk=disk) as vm:
+    with VM(args, f"disk-metadata-{machine}", machine=machine,
+            append="user disk=hda,rw", module=program, disk=disk) as vm:
         text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text)
         assert "disk write rejected" in text and "[USER] Exit status=00000000" in text, text
         assert "[PANIC]" not in text, text
     assert disk.read_bytes() == malformed
-    print("PASS ext2 rejects writes into metadata before changing data", flush=True)
+    print(f"PASS ext2 rejects writes into metadata before changing data: {machine}", flush=True)
 
     disk.write_bytes(image[:9 * block])
-    with VM(args, "disk-truncated", append="disk=hda,rw", disk=disk) as vm:
+    with VM(args, f"disk-truncated-{machine}", machine=machine, append="disk=hda,rw", disk=disk) as vm:
         text = vm.wait(lambda text: "[BOOT] Ready" in text)
         assert "[DISK] Could not mount hda" in text and "[PANIC]" not in text, text
-    print("PASS boot with truncated ext2 disk", flush=True)
+    print(f"PASS boot with truncated ext2 disk: {machine}", flush=True)
 
 
 def disk_growth(args, temp):
@@ -1078,45 +1083,53 @@ def swap(args, temp):
         assert "[SWAP] Slot ownership, protection and I/O errors verified" in text, text
     print("PASS swap slots, fork, permissions and I/O failures", flush=True)
 
-    disk = temp / "swap.img"
     header = b"KMOS-SWAP\x00".ljust(4096, b"\x00")
-    with disk.open("wb") as image:
-        image.write(header)
-        image.truncate(16 * 1024 * 1024)
     program = build_user_test(args, temp, "swap_test.c", "init")
-    with VM(args, "swap-pressure", 16, append="user swap=hdb", module=program, swap_disk=disk) as vm:
-        text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=60)
-        assert "[SWAP] hdb enabled" in text and "swap under memory pressure verified" in text, text
-        assert "[USER] Exit status=00000000" in text and "Frame leak" not in text, text
-        assert "[PANIC]" not in text and "[USER] fault" not in text, text
-        text = vm.serial_command("swap")
-        assert "Used Swap:        0 MB (0 KB)" in text, text
-    with disk.open("rb") as image:
-        assert image.read(4096) == header and any(image.read(16 * 4096))
-    print("PASS disk swap under user memory pressure", flush=True)
+    for machine in ("pc", "q35"):
+        disk = temp / f"swap-{machine}.img"
+        with disk.open("wb") as image:
+            image.write(header)
+            image.truncate(16 * 1024 * 1024)
+        with VM(args, f"swap-pressure-{machine}", 16, machine=machine,
+                append="user swap=hdb", module=program, swap_disk=disk) as vm:
+            text = vm.wait(lambda text: "kmOS:/$ " in text or "[PANIC]" in text, timeout=60)
+            assert "[SWAP] hdb enabled" in text and "swap under memory pressure verified" in text, text
+            if machine == "q35":
+                assert "[AHCI] hdb detected" in text, text
+            assert "[USER] Exit status=00000000" in text and "Frame leak" not in text, text
+            assert "[PANIC]" not in text and "[USER] fault" not in text, text
+            text = vm.serial_command("swap")
+            assert "Used Swap:        0 MB (0 KB)" in text, text
+        with disk.open("rb") as image:
+            assert image.read(4096) == header and any(image.read(16 * 4096))
+        print(f"PASS disk swap under user memory pressure: {machine}", flush=True)
 
-    with disk.open("r+b") as image:
-        image.write(b"INVALID")
-    with VM(args, "swap-invalid", append="swap=hdb", swap_disk=disk) as vm:
-        text = vm.wait(lambda text: "[BOOT] Ready" in text)
-        assert "[SWAP] hdb unavailable or invalid" in text and "[PANIC]" not in text, text
-    print("PASS boot with invalid swap image", flush=True)
+        with disk.open("r+b") as image:
+            image.write(b"INVALID")
+        with VM(args, f"swap-invalid-{machine}", machine=machine, append="swap=hdb", swap_disk=disk) as vm:
+            text = vm.wait(lambda text: "[BOOT] Ready" in text)
+            assert "[SWAP] hdb unavailable or invalid" in text and "[PANIC]" not in text, text
+        print(f"PASS boot with invalid swap image: {machine}", flush=True)
 
 
 def storage_and_user_regressions(args, temp):
-    disk = temp / "ata.img"
-    contents = bytearray(16 * 512)
-    contents[:512] = bytes([0x5a]) * 512
-    contents[-512:] = bytes([0x7b]) * 512
-    disk.write_bytes(contents)
-    with VM(args, "ata", append="test=ata", disk=disk, disk_write_bps=2048) as vm:
-        text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
-        assert vm.process.wait(timeout=2) == 33, text
-        assert "[STORAGE] ATA bounds, transfers and flush verified" in text, text
-        assert "[PANIC]" not in text, text
-    contents[512:1536] = bytes((i * 17 + 3) & 255 for i in range(1024))
-    assert disk.read_bytes() == contents, "ATA wrote outside the requested sectors"
-    print("PASS ATA address bounds, slow writes and persisted contents", flush=True)
+    for machine in ("pc", "q35"):
+        disk = temp / f"raw-{machine}.img"
+        contents = bytearray(16 * 512)
+        contents[:512] = bytes([0x5a]) * 512
+        contents[-512:] = bytes([0x7b]) * 512
+        disk.write_bytes(contents)
+        with VM(args, f"disk-bounds-{machine}", machine=machine, append="test=ata",
+                disk=disk, disk_write_bps=2048) as vm:
+            text = vm.wait(lambda text: "[TEST] passed" in text or "[TEST] failed" in text)
+            assert vm.process.wait(timeout=2) == 33, text
+            assert "[STORAGE] Disk bounds, transfers and flush verified" in text, text
+            if machine == "q35":
+                assert "[AHCI] hda detected" in text, text
+            assert "[PANIC]" not in text, text
+        contents[512:3584] = bytes((i * 17 + 3) & 255 for i in range(3072))
+        assert disk.read_bytes() == contents, "disk wrote outside the requested sectors"
+        print(f"PASS raw disk bounds, slow writes and persisted contents: {machine}", flush=True)
 
     read_program = build_user_test(args, temp, "read_test.c", "read-test")
     fpu_program = build_user_test(args, temp, "fpu_test.c", "init")
@@ -1392,6 +1405,7 @@ def main():
         storage_and_user_regressions(args, Path(temp))
         swap(args, Path(temp))
         disk_mount(args, Path(temp))
+        disk_mount(args, Path(temp), "q35")
         disk_growth(args, Path(temp))
         disk_remove(args, Path(temp))
         disk_indirect_recovery(args, Path(temp))

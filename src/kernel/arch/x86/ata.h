@@ -1,7 +1,7 @@
 #ifndef ATA_H
 #define ATA_H
 
-#include <core/block_device.h>
+#include <arch/x86/disk.h>
 
 struct ATAIdentifyData {
     char model[41];
@@ -9,7 +9,7 @@ struct ATAIdentifyData {
     bool present;
 };
 
-class ATADevice : public BlockDevice {
+class ATADevice : public DiskDevice {
 public:
     ATADevice(const char* name, u16 io_base, u16 ctrl_base, u8 slave, bool publish = true);
     virtual ~ATADevice();
@@ -18,20 +18,16 @@ public:
     virtual u32 read_blocks(u32 lba, u32 count, void* buffer) override;
     virtual u32 write_blocks(u32 lba, u32 count, const void* buffer) override;
 
-    const ATAIdentifyData& identify() const { return identify_; }
+    u32 sector_count() const override { return identify_.present ? identify_.total_sectors : 0; }
 
 private:
     bool wait_status(u8 set, u8 clear, bool check_errors);
     void select_drive(u32 lba);
-    bool valid_range(u32 lba, u32 count) const;
 
     u16 io_base_;
     u16 ctrl_base_;
     u8 slave_;
     ATAIdentifyData identify_;
 };
-
-void ata_init(bool publish = true);
-ATADevice* ata_primary_master();
 
 #endif
